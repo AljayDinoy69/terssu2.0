@@ -3,6 +3,8 @@ import cors from 'cors';
 import morgan from 'morgan';
 import dotenv from 'dotenv';
 import connectDB from './db.js';
+import { v2 as cloudinary } from 'cloudinary';
+import multer from 'multer';
 import Account from './models/Account.js';
 import Report from './models/Report.js';
 
@@ -14,6 +16,16 @@ const PORT = process.env.PORT || 4000;
 app.use(cors({ origin: '*', methods: ['GET', 'POST', 'PATCH', 'DELETE'], allowedHeaders: ['Content-Type', 'Authorization'] }));
 app.use(express.json({ limit: '1mb' }));
 app.use(morgan('dev'));
+
+// Cloudinary config
+cloudinary.config({
+  cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
+  api_key: process.env.CLOUDINARY_API_KEY,
+  api_secret: process.env.CLOUDINARY_API_SECRET,
+});
+
+// Multer (memory) for image uploads
+const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 } });
 
 // Helpers
 function sanitizeAccount(acc) {
@@ -37,6 +49,35 @@ function withId(obj) {
 // Health
 app.get('/health', (_req, res) => {
   res.json({ ok: true, service: 'ers-server', time: Date.now() });
+});
+
+// Upload endpoint (multipart/form-data)
+app.post('/upload', upload.single('file'), async (req, res) => {
+  try {
+    if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
+    const folder = process.env.CLOUDINARY_FOLDER || 'ers';
+    const stream = cloudinary.uploader.upload_stream(
+      { folder, resource_type: 'image' },
+      (err, result) => {
+        if (err || !result) {
+          console.error('Cloudinary upload error', err);
+          return res.status(500).json({ error: 'Failed to upload image' });
+        }
+        res.status(201).json({
+          url: result.secure_url,
+          publicId: result.public_id,
+          width: result.width,
+          height: result.height,
+          bytes: result.bytes,
+          format: result.format,
+        });
+      }
+    );
+    stream.end(req.file.buffer);
+  } catch (err) {
+    console.error('Upload endpoint error', err);
+    res.status(500).json({ error: 'Internal server error' });
+  }
 });
 
 // Auth
@@ -138,6 +179,8 @@ app.post('/reports', async (req, res) => {
     const input = req.body || {};
     const required = ['type', 'description', 'location', 'responderId'];
     for (const key of required) if (!input[key]) return res.status(400).json({ error: `Missing field: ${key}` });
+    // Allow clients that still send photoUri
+    if (!input.photoUrl && input.photoUri) input.photoUrl = input.photoUri;
     const created = await Report.create({ ...input, status: 'Pending' });
     const report = withId(created.toObject());
     res.status(201).json({ report });

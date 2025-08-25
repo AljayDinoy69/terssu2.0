@@ -20,6 +20,7 @@ export type Report = {
   description: string;
   location: string;
   photoUri?: string;
+  photoUrl?: string;
   userId?: string; // undefined when anonymous
   responderId: string;
   status: ReportStatus;

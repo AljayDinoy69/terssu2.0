@@ -5,6 +5,7 @@ const ReportSchema = new mongoose.Schema(
     type: { type: String, required: true },
     description: { type: String, required: true },
     location: { type: String, required: true },
+    photoUrl: { type: String },
     responderId: { type: String, required: true, index: true },
     userId: { type: String },
     status: { type: String, enum: ['Pending', 'In-progress', 'Resolved'], default: 'Pending', index: true },

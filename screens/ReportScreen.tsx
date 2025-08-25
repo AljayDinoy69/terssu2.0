@@ -5,6 +5,7 @@ import { RootStackParamList } from '../navigation/AppNavigator';
 import * as Location from 'expo-location';
 import * as ImagePicker from 'expo-image-picker';
 import { createReport, getCurrentUser, listResponders } from '../utils/auth';
+import { uploadImage } from '../utils/api';
 
 export type ReportProps = NativeStackScreenProps<RootStackParamList, 'Report'>;
 
@@ -192,11 +193,21 @@ export default function ReportScreen({ navigation, route }: ReportProps) {
       setLoading(true);
       const user = await getCurrentUser();
       const userId = isAnonymous ? undefined : user?.id;
+      let photoUrl: string | undefined;
+      if (photoUri) {
+        try {
+          const uploaded = await uploadImage(photoUri);
+          photoUrl = uploaded.url;
+        } catch (err: any) {
+          // If upload fails, proceed without photo but notify user
+          Alert.alert('Photo upload failed', err?.message || 'Unable to upload image. The report will be submitted without a photo.');
+        }
+      }
       await createReport({
         type: incidentType,
         description, // optional
         location: locationText,
-        photoUri, // optional
+        photoUrl, // preferred; server also maps legacy photoUri
         responderId,
         userId,
         fullName: fullName || undefined,

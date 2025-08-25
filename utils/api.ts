@@ -27,4 +27,28 @@ export const api = {
   delete: <T>(path: string) => request<T>(path, { method: 'DELETE' }),
 };
 
+// Upload image to server -> Cloudinary. Expects a local file URI (Expo/React Native)
+export async function uploadImage(uri: string): Promise<{ url: string; publicId: string; width: number; height: number; bytes: number; format: string; }>{
+  const form = new FormData();
+  // Guess a filename and type from uri
+  const name = uri.split('/').pop() || `photo.jpg`;
+  const ext = (name.split('.').pop() || 'jpg').toLowerCase();
+  const type = `image/${ext === 'jpg' ? 'jpeg' : ext}`;
+  form.append('file', { uri, name, type } as any);
+
+  const res = await fetch(`${API_BASE_URL}/upload`, {
+    method: 'POST',
+    // Do NOT set Content-Type; RN will set the correct multipart boundary
+    body: form,
+  });
+  const text = await res.text();
+  let data: any;
+  try { data = text ? JSON.parse(text) : {}; } catch { data = { raw: text }; }
+  if (!res.ok) {
+    const msg = data?.error || res.statusText || 'Upload failed';
+    throw new Error(msg);
+  }
+  return data as any;
+}
+
 export default api;
