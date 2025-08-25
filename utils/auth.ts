@@ -1,4 +1,5 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import api from './api';
 
 export type Role = 'user' | 'responder' | 'admin';
 
@@ -8,7 +9,7 @@ export type Account = {
   email: string;
   phone?: string;
   role: Role;
-  password: string; // plain for mock only
+  password?: string; // optional: server does not return password
 };
 
 export type ReportStatus = 'Pending' | 'In-progress' | 'Resolved';
@@ -22,7 +23,7 @@ export type Report = {
   userId?: string; // undefined when anonymous
   responderId: string;
   status: ReportStatus;
-  createdAt: number;
+  createdAt: number | string;
   // Additional optional metadata
   fullName?: string;
   contactNo?: string;
@@ -68,31 +69,24 @@ function uid(prefix: string) {
 }
 
 export async function signUpUser({ name, email, password, phone }: { name: string; email: string; password: string; phone: string; }) {
-  await ensureSeed();
-  const accounts: Account[] = JSON.parse((await AsyncStorage.getItem(KEYS.accounts)) || '[]');
-  if (accounts.find(a => a.email.toLowerCase() === email.toLowerCase())) throw new Error('Email already exists');
-  const acc: Account = { id: uid('usr'), name, email, phone, role: 'user', password };
-  accounts.push(acc);
-  await AsyncStorage.setItem(KEYS.accounts, JSON.stringify(accounts));
-  await AsyncStorage.setItem(KEYS.session, JSON.stringify({ id: acc.id }));
-  return acc;
+  // Use server API
+  const { user } = await api.post<{ user: Account }>('/auth/signup', { name, email, password, phone });
+  // Store session with full user for quick access
+  await AsyncStorage.setItem(KEYS.session, JSON.stringify({ id: user.id, user }));
+  return user;
 }
 
 export async function login(email: string, password: string) {
-  await ensureSeed();
-  const accounts: Account[] = JSON.parse((await AsyncStorage.getItem(KEYS.accounts)) || '[]');
-  const acc = accounts.find(a => a.email.toLowerCase() === email.toLowerCase() && a.password === password);
-  if (!acc) throw new Error('Invalid email or password');
-  await AsyncStorage.setItem(KEYS.session, JSON.stringify({ id: acc.id }));
-  return acc;
+  // Use server API
+  const { user } = await api.post<{ user: Account }>('/auth/login', { email, password });
+  await AsyncStorage.setItem(KEYS.session, JSON.stringify({ id: user.id, user }));
+  return user;
 }
 
 export async function getCurrentUser(): Promise<Account | null> {
-  await ensureSeed();
   const sess = JSON.parse((await AsyncStorage.getItem(KEYS.session)) || 'null');
-  if (!sess?.id) return null;
-  const accounts: Account[] = JSON.parse((await AsyncStorage.getItem(KEYS.accounts)) || '[]');
-  return accounts.find(a => a.id === sess.id) || null;
+  if (sess?.user) return sess.user as Account;
+  return null;
 }
 
 export async function logout() {
@@ -100,90 +94,56 @@ export async function logout() {
 }
 
 export async function listUsers() {
-  await ensureSeed();
-  const accounts: Account[] = JSON.parse((await AsyncStorage.getItem(KEYS.accounts)) || '[]');
-  return accounts.filter(a => a.role !== 'admin');
+  const { users } = await api.get<{ users: Account[] }>('/users');
+  return users;
 }
 
 export async function createResponder({ name, email, phone, password }: { name: string; email: string; phone: string; password: string; }) {
-  await ensureSeed();
-  const accounts: Account[] = JSON.parse((await AsyncStorage.getItem(KEYS.accounts)) || '[]');
-  if (accounts.find(a => a.email.toLowerCase() === email.toLowerCase())) throw new Error('Email already exists');
-  const acc: Account = { id: uid('rsp'), name, email, phone, role: 'responder', password };
-  accounts.push(acc);
-  await AsyncStorage.setItem(KEYS.accounts, JSON.stringify(accounts));
-  return acc;
+  const { user } = await api.post<{ user: Account }>('/users', { name, email, phone, password, role: 'responder' });
+  return user;
 }
 
 // Admin-only: create a regular user without logging them in
 export async function createUserAdmin({ name, email, phone, password }: { name: string; email: string; phone: string; password: string; }) {
-  await ensureSeed();
-  const accounts: Account[] = JSON.parse((await AsyncStorage.getItem(KEYS.accounts)) || '[]');
-  if (accounts.find(a => a.email.toLowerCase() === email.toLowerCase())) throw new Error('Email already exists');
-  const acc: Account = { id: uid('usr'), name, email, phone, role: 'user', password };
-  accounts.push(acc);
-  await AsyncStorage.setItem(KEYS.accounts, JSON.stringify(accounts));
-  return acc;
+  const { user } = await api.post<{ user: Account }>('/users', { name, email, phone, password, role: 'user' });
+  return user;
 }
 
 export async function deleteAccount(id: string) {
-  const accounts: Account[] = JSON.parse((await AsyncStorage.getItem(KEYS.accounts)) || '[]');
-  const filtered = accounts.filter(a => a.id !== id);
-  await AsyncStorage.setItem(KEYS.accounts, JSON.stringify(filtered));
+  await api.delete<void>(`/users/${id}`);
 }
 
 export async function updateAccount(id: string, patch: Partial<Omit<Account, 'id'>> & { role?: Role }) {
-  const accounts: Account[] = JSON.parse((await AsyncStorage.getItem(KEYS.accounts)) || '[]');
-  const idx = accounts.findIndex(a => a.id === id);
-  if (idx === -1) throw new Error('Account not found');
-  // Prevent removing admin role from the default admin accidentally
-  const current = accounts[idx];
-  const updated: Account = {
-    ...current,
-    ...patch,
-    id: current.id,
-  };
-  accounts[idx] = updated;
-  await AsyncStorage.setItem(KEYS.accounts, JSON.stringify(accounts));
-  return updated;
+  const { user } = await api.patch<{ user: Account }>(`/users/${id}`, patch);
+  return user;
 }
 
 export async function listResponders() {
-  const accounts: Account[] = JSON.parse((await AsyncStorage.getItem(KEYS.accounts)) || '[]');
-  return accounts.filter(a => a.role === 'responder');
+  const { responders } = await api.get<{ responders: Account[] }>('/responders');
+  return responders;
 }
 
 export async function createReport(input: Omit<Report, 'id' | 'status' | 'createdAt'>) {
-  await ensureSeed();
-  const reports: Report[] = JSON.parse((await AsyncStorage.getItem(KEYS.reports)) || '[]');
-  const report: Report = { id: uid('rpt'), status: 'Pending', createdAt: Date.now(), ...input };
-  reports.unshift(report);
-  await AsyncStorage.setItem(KEYS.reports, JSON.stringify(reports));
+  const { report } = await api.post<{ report: Report }>('/reports', input);
   return report;
 }
 
 export async function listReportsByUser(userId: string) {
-  const reports: Report[] = JSON.parse((await AsyncStorage.getItem(KEYS.reports)) || '[]');
-  return reports.filter(r => r.userId === userId);
+  const { reports } = await api.get<{ reports: Report[] }>(`/reports/user/${userId}`);
+  return reports;
 }
 
 export async function listAssignedReports(responderId: string) {
-  const reports: Report[] = JSON.parse((await AsyncStorage.getItem(KEYS.reports)) || '[]');
-  return reports.filter(r => r.responderId === responderId);
+  const { reports } = await api.get<{ reports: Report[] }>(`/reports/responder/${responderId}`);
+  return reports;
 }
 
 export async function updateReportStatus(reportId: string, status: ReportStatus) {
-  const reports: Report[] = JSON.parse((await AsyncStorage.getItem(KEYS.reports)) || '[]');
-  const idx = reports.findIndex(r => r.id === reportId);
-  if (idx >= 0) {
-    reports[idx].status = status;
-    await AsyncStorage.setItem(KEYS.reports, JSON.stringify(reports));
-    return reports[idx];
-  }
-  throw new Error('Report not found');
+  const { report } = await api.patch<{ report: Report }>(`/reports/${reportId}/status`, { status });
+  return report;
 }
 
 export async function listAllReports() {
-  const reports: Report[] = JSON.parse((await AsyncStorage.getItem(KEYS.reports)) || '[]');
+  const { reports } = await api.get<{ reports: Report[] }>('/reports');
   return reports;
 }

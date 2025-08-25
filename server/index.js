@@ -2,6 +2,9 @@ import express from 'express';
 import cors from 'cors';
 import morgan from 'morgan';
 import dotenv from 'dotenv';
+import connectDB from './db.js';
+import Account from './models/Account.js';
+import Report from './models/Report.js';
 
 dotenv.config();
 
@@ -12,33 +15,24 @@ app.use(cors({ origin: '*', methods: ['GET', 'POST', 'PATCH', 'DELETE'], allowed
 app.use(express.json({ limit: '1mb' }));
 app.use(morgan('dev'));
 
-// In-memory data store (mock). Replace with DB later.
-const KEYS = { accounts: 'ERS_ACCOUNTS', reports: 'ERS_REPORTS' };
+// Helpers
+function sanitizeAccount(acc) {
+  if (!acc) return acc;
+  if (typeof acc.toSafeJSON === 'function') return acc.toSafeJSON();
+  const { password, ...rest } = acc;
+  return rest;
+}
 
-/** Accounts and session (mock) */
-const accounts = [];
-const reports = [];
-
-const defaultAdmin = {
-  id: 'admin-1',
-  name: 'System Admin',
-  email: 'admin@ers.local',
-  phone: '0000000000',
-  role: 'admin',
-  password: 'admin123',
-};
-
-function ensureSeed() {
-  if (!accounts.find(a => a.role === 'admin')) {
-    accounts.unshift({ ...defaultAdmin });
+function withId(obj) {
+  if (!obj) return obj;
+  const o = { ...obj };
+  if (o._id && !o.id) {
+    o.id = String(o._id);
+    delete o._id;
   }
+  delete o.password;
+  return o;
 }
-
-function uid(prefix) {
-  return `${prefix}_${Math.random().toString(36).slice(2, 10)}`;
-}
-
-ensureSeed();
 
 // Health
 app.get('/health', (_req, res) => {
@@ -46,109 +40,186 @@ app.get('/health', (_req, res) => {
 });
 
 // Auth
-app.post('/auth/signup', (req, res) => {
-  const { name, email, password, phone } = req.body || {};
-  if (!name || !email || !password) return res.status(400).json({ error: 'Missing required fields' });
-  if (accounts.find(a => a.email.toLowerCase() === String(email).toLowerCase())) {
-    return res.status(409).json({ error: 'Email already exists' });
+app.post('/auth/signup', async (req, res) => {
+  try {
+    const { name, email, password, phone } = req.body || {};
+    if (!name || !email || !password) return res.status(400).json({ error: 'Missing required fields' });
+    const exists = await Account.findOne({ email: String(email).toLowerCase() }).lean();
+    if (exists) return res.status(409).json({ error: 'Email already exists' });
+    const acc = await Account.create({ name, email, phone, role: 'user', password });
+    res.status(201).json({ user: sanitizeAccount(acc) });
+  } catch (err) {
+    console.error('Signup error', err);
+    res.status(500).json({ error: 'Internal server error' });
   }
-  const acc = { id: uid('usr'), name, email, phone, role: 'user', password };
-  accounts.push(acc);
-  res.status(201).json({ user: sanitize(acc) });
 });
 
-app.post('/auth/login', (req, res) => {
-  const { email, password } = req.body || {};
-  const acc = accounts.find(a => a.email.toLowerCase() === String(email).toLowerCase() && a.password === password);
-  if (!acc) return res.status(401).json({ error: 'Invalid email or password' });
-  // For mock, return user object directly. In real app, issue JWT
-  res.json({ user: sanitize(acc) });
+app.post('/auth/login', async (req, res) => {
+  try {
+    const { email, password } = req.body || {};
+    const acc = await Account.findOne({ email: String(email).toLowerCase(), password });
+    if (!acc) return res.status(401).json({ error: 'Invalid email or password' });
+    // For mock, return user object directly. In real app, issue JWT
+    res.json({ user: sanitizeAccount(acc) });
+  } catch (err) {
+    console.error('Login error', err);
+    res.status(500).json({ error: 'Internal server error' });
+  }
 });
 
 // Users
-app.get('/users', (_req, res) => {
-  const nonAdmins = accounts.filter(a => a.role !== 'admin').map(sanitize);
-  res.json({ users: nonAdmins });
-});
-
-app.post('/users', (req, res) => {
-  const { name, email, phone, password, role } = req.body || {};
-  if (!name || !email || !password) return res.status(400).json({ error: 'Missing required fields' });
-  if (!['user', 'responder', 'admin'].includes(role || 'user')) return res.status(400).json({ error: 'Invalid role' });
-  if (accounts.find(a => a.email.toLowerCase() === String(email).toLowerCase())) {
-    return res.status(409).json({ error: 'Email already exists' });
+app.get('/users', async (_req, res) => {
+  try {
+    const usersRaw = await Account.find({ role: { $ne: 'admin' } }, { password: 0 }).lean();
+    const users = usersRaw.map(withId);
+    res.json({ users });
+  } catch (err) {
+    console.error('List users error', err);
+    res.status(500).json({ error: 'Internal server error' });
   }
-  const acc = { id: uid(role === 'responder' ? 'rsp' : 'usr'), name, email, phone, role: role || 'user', password };
-  accounts.push(acc);
-  res.status(201).json({ user: sanitize(acc) });
 });
 
-app.patch('/users/:id', (req, res) => {
-  const { id } = req.params;
-  const idx = accounts.findIndex(a => a.id === id);
-  if (idx === -1) return res.status(404).json({ error: 'Account not found' });
-  const current = accounts[idx];
-  const patch = req.body || {};
-  const updated = { ...current, ...patch, id: current.id };
-  accounts[idx] = updated;
-  res.json({ user: sanitize(updated) });
-});
-
-app.delete('/users/:id', (req, res) => {
-  const { id } = req.params;
-  const before = accounts.length;
-  for (let i = accounts.length - 1; i >= 0; i--) {
-    if (accounts[i].id === id) accounts.splice(i, 1);
+app.post('/users', async (req, res) => {
+  try {
+    const { name, email, phone, password, role } = req.body || {};
+    if (!name || !email || !password) return res.status(400).json({ error: 'Missing required fields' });
+    if (!['user', 'responder', 'admin'].includes(role || 'user')) return res.status(400).json({ error: 'Invalid role' });
+    const exists = await Account.findOne({ email: String(email).toLowerCase() }).lean();
+    if (exists) return res.status(409).json({ error: 'Email already exists' });
+    const acc = await Account.create({ name, email, phone, role: role || 'user', password });
+    res.status(201).json({ user: sanitizeAccount(acc) });
+  } catch (err) {
+    console.error('Create user error', err);
+    res.status(500).json({ error: 'Internal server error' });
   }
-  if (before === accounts.length) return res.status(404).json({ error: 'Account not found' });
-  res.status(204).send();
 });
 
-app.get('/responders', (_req, res) => {
-  const responders = accounts.filter(a => a.role === 'responder').map(sanitize);
-  res.json({ responders });
+app.patch('/users/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const patch = { ...req.body };
+    delete patch.password; // prevent accidental password change here
+    const updatedDoc = await Account.findByIdAndUpdate(id, patch, { new: true, projection: { password: 0 } });
+    const updated = updatedDoc ? withId(updatedDoc.toObject()) : null;
+    if (!updated) return res.status(404).json({ error: 'Account not found' });
+    res.json({ user: updated });
+  } catch (err) {
+    console.error('Update user error', err);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+app.delete('/users/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const deleted = await Account.findByIdAndDelete(id);
+    if (!deleted) return res.status(404).json({ error: 'Account not found' });
+    res.status(204).send();
+  } catch (err) {
+    console.error('Delete user error', err);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+app.get('/responders', async (_req, res) => {
+  try {
+    const respondersRaw = await Account.find({ role: 'responder' }, { password: 0 }).lean();
+    const responders = respondersRaw.map(withId);
+    res.json({ responders });
+  } catch (err) {
+    console.error('List responders error', err);
+    res.status(500).json({ error: 'Internal server error' });
+  }
 });
 
 // Reports
-app.post('/reports', (req, res) => {
-  const input = req.body || {};
-  const required = ['type', 'description', 'location', 'responderId'];
-  for (const key of required) if (!input[key]) return res.status(400).json({ error: `Missing field: ${key}` });
-  const report = { id: uid('rpt'), status: 'Pending', createdAt: Date.now(), ...input };
-  reports.unshift(report);
-  res.status(201).json({ report });
+app.post('/reports', async (req, res) => {
+  try {
+    const input = req.body || {};
+    const required = ['type', 'description', 'location', 'responderId'];
+    for (const key of required) if (!input[key]) return res.status(400).json({ error: `Missing field: ${key}` });
+    const created = await Report.create({ ...input, status: 'Pending' });
+    const report = withId(created.toObject());
+    res.status(201).json({ report });
+  } catch (err) {
+    console.error('Create report error', err);
+    res.status(500).json({ error: 'Internal server error' });
+  }
 });
 
-app.get('/reports', (_req, res) => {
-  res.json({ reports });
+app.get('/reports', async (_req, res) => {
+  try {
+    const reportsRaw = await Report.find({}).sort({ createdAt: -1 }).lean();
+    const reports = reportsRaw.map(withId);
+    res.json({ reports });
+  } catch (err) {
+    console.error('List reports error', err);
+    res.status(500).json({ error: 'Internal server error' });
+  }
 });
 
-app.get('/reports/user/:userId', (req, res) => {
-  const { userId } = req.params;
-  res.json({ reports: reports.filter(r => r.userId === userId) });
+app.get('/reports/user/:userId', async (req, res) => {
+  try {
+    const { userId } = req.params;
+    const reportsRaw = await Report.find({ userId }).sort({ createdAt: -1 }).lean();
+    const reports = reportsRaw.map(withId);
+    res.json({ reports });
+  } catch (err) {
+    console.error('List user reports error', err);
+    res.status(500).json({ error: 'Internal server error' });
+  }
 });
 
-app.get('/reports/responder/:responderId', (req, res) => {
-  const { responderId } = req.params;
-  res.json({ reports: reports.filter(r => r.responderId === responderId) });
+app.get('/reports/responder/:responderId', async (req, res) => {
+  try {
+    const { responderId } = req.params;
+    const reportsRaw = await Report.find({ responderId }).sort({ createdAt: -1 }).lean();
+    const reports = reportsRaw.map(withId);
+    res.json({ reports });
+  } catch (err) {
+    console.error('List responder reports error', err);
+    res.status(500).json({ error: 'Internal server error' });
+  }
 });
 
-app.patch('/reports/:id/status', (req, res) => {
-  const { id } = req.params;
-  const { status } = req.body || {};
-  const allowed = ['Pending', 'In-progress', 'Resolved'];
-  if (!allowed.includes(status)) return res.status(400).json({ error: 'Invalid status' });
-  const idx = reports.findIndex(r => r.id === id);
-  if (idx === -1) return res.status(404).json({ error: 'Report not found' });
-  reports[idx].status = status;
-  res.json({ report: reports[idx] });
+app.patch('/reports/:id/status', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { status } = req.body || {};
+    const allowed = ['Pending', 'In-progress', 'Resolved'];
+    if (!allowed.includes(status)) return res.status(400).json({ error: 'Invalid status' });
+    const updatedDoc = await Report.findByIdAndUpdate(id, { status }, { new: true });
+    if (!updatedDoc) return res.status(404).json({ error: 'Report not found' });
+    const report = withId(updatedDoc.toObject());
+    res.json({ report });
+  } catch (err) {
+    console.error('Update report status error', err);
+    res.status(500).json({ error: 'Internal server error' });
+  }
 });
 
-function sanitize(acc) {
-  const { password, ...rest } = acc;
-  return rest;
+async function start() {
+  try {
+    await connectDB(process.env.MONGODB_URI);
+    // Seed default admin if missing
+    const adminExists = await Account.findOne({ role: 'admin' }).lean();
+    if (!adminExists) {
+      await Account.create({
+        name: 'System Admin',
+        email: 'admin@ers.local',
+        phone: '0000000000',
+        role: 'admin',
+        password: 'admin123',
+      });
+      console.log('Seeded default admin account (admin@ers.local / admin123)');
+    }
+    app.listen(PORT, () => {
+      console.log(`ERS server listening on http://localhost:${PORT}`);
+    });
+  } catch (err) {
+    console.error('Failed to start server', err);
+    process.exit(1);
+  }
 }
 
-app.listen(PORT, () => {
-  console.log(`ERS server listening on http://localhost:${PORT}`);
-});
+start();
