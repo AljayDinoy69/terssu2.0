@@ -7,6 +7,7 @@ import { v2 as cloudinary } from 'cloudinary';
 import multer from 'multer';
 import Account from './models/Account.js';
 import Report from './models/Report.js';
+import Notification from './models/Notification.js';
 
 dotenv.config();
 
@@ -215,6 +216,19 @@ app.post('/reports', async (req, res) => {
     res.status(201).json({ report });
     // Broadcast SSE event for new report
     sseBroadcast({ type: 'report:new', report });
+    // Create a Notification for the assigned responder
+    try {
+      if (report.responderId) {
+        const notif = await Notification.create({
+          userId: String(report.responderId),
+          title: 'New report assigned to you',
+          reportId: String(report.id),
+          kind: 'new',
+          read: false,
+        });
+        // Optional: could broadcast a notification event in future
+      }
+    } catch (e) { console.error('Create notification error', e); }
   } catch (err) {
     console.error('Create report error', err);
     res.status(500).json({ error: 'Internal server error' });
@@ -268,8 +282,77 @@ app.patch('/reports/:id/status', async (req, res) => {
     res.json({ report });
     // Broadcast SSE event for report status update
     sseBroadcast({ type: 'report:update', report });
+    // Do NOT notify the responder on status updates; only notify the reporting user below
+    // Also notify the reporting user when their case status changes
+    try {
+      if (report.userId) {
+        let title = 'Your report was updated';
+        if (report.status === 'In-progress') title = 'Your report is now in progress (taken)';
+        if (report.status === 'Resolved') title = 'Your report has been completed';
+        await Notification.create({
+          userId: String(report.userId),
+          title,
+          reportId: String(report.id),
+          kind: 'update',
+          read: false,
+        });
+      }
+    } catch (e) { console.error('Create user notification error', e); }
   } catch (err) {
     console.error('Update report status error', err);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// Notifications API
+app.get('/notifications', async (req, res) => {
+  try {
+    const userId = String(req.query.userId || '').trim();
+    if (!userId) return res.status(400).json({ error: 'userId is required' });
+    const docs = await Notification.find({ userId }).sort({ createdAt: -1 }).lean();
+    const notifications = docs.map(d => ({ ...d, id: String(d._id), _id: undefined }));
+    res.json({ notifications });
+  } catch (err) {
+    console.error('List notifications error', err);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+app.patch('/notifications/:id/read', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { read } = req.body || {};
+    const updated = await Notification.findByIdAndUpdate(id, { read: !!read }, { new: true }).lean();
+    if (!updated) return res.status(404).json({ error: 'Notification not found' });
+    const notification = { ...updated, id: String(updated._id) };
+    delete notification._id;
+    res.json({ notification });
+  } catch (err) {
+    console.error('Update notification read error', err);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+app.delete('/notifications/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const deleted = await Notification.findByIdAndDelete(id);
+    if (!deleted) return res.status(404).json({ error: 'Notification not found' });
+    res.status(204).send();
+  } catch (err) {
+    console.error('Delete notification error', err);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+app.post('/notifications/mark-all-read', async (req, res) => {
+  try {
+    const { userId } = req.body || {};
+    if (!userId) return res.status(400).json({ error: 'userId is required' });
+    await Notification.updateMany({ userId, read: false }, { read: true });
+    res.json({ ok: true });
+  } catch (err) {
+    console.error('Mark all read error', err);
     res.status(500).json({ error: 'Internal server error' });
   }
 });

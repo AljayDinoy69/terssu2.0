@@ -3,7 +3,7 @@ import { View, Text, StyleSheet, FlatList, TouchableOpacity, Alert, Image, Scrol
 import * as Location from 'expo-location';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { RootStackParamList } from '../navigation/AppNavigator';
-import { getCurrentUser, listAssignedReports, logout, Report, updateReportStatus, ReportStatus, listUsers } from '../utils/auth';
+import { getCurrentUser, listAssignedReports, logout, Report, updateReportStatus, ReportStatus, listUsers, listNotifications, markNotificationRead, deleteNotification, markAllNotificationsRead, Notification as NotificationItem } from '../utils/auth';
 import { API_BASE_URL } from '../utils/api';
 import { listResponders } from '../utils/auth';
 import { playNotificationSound } from '../utils/sound';
@@ -13,7 +13,7 @@ export type ResponderDashProps = NativeStackScreenProps<RootStackParamList, 'Res
 
 const { width } = Dimensions.get('window');
 
-type Notif = { id: string; title: string; time: number; kind: 'new' | 'update'; reportId?: string };
+// Notifications are persisted on the server
 
 const nextStatus: Record<ReportStatus, ReportStatus> = {
   'Pending': 'In-progress',
@@ -32,7 +32,7 @@ export default function ResponderDashboard({ navigation }: ResponderDashProps) {
   const didInitRef = useRef<boolean>(false);
   const sseActiveRef = useRef<boolean>(false);
   const meRef = useRef<any>(null);
-  const [notifs, setNotifs] = useState<Notif[]>([]);
+  const [notifs, setNotifs] = useState<NotificationItem[]>([]);
   const [notifOpen, setNotifOpen] = useState(false);
   const unseenRef = useRef(0);
   const [unseen, setUnseen] = useState(0);
@@ -145,26 +145,18 @@ export default function ResponderDashboard({ navigation }: ResponderDashProps) {
                 const report = evt.report;
                 if (report?.responderId && meRef.current?.id && report.responderId === meRef.current.id) {
                   await load();
-                  // Only beep for new Pending assigned to me
                   if (report.status === 'Pending') playNotificationSound();
-                  const now = Date.now();
-                  const reportId = report?.id || report?._id;
-                  const id = `new-${reportId || now}`;
-                  const item: Notif = { id, title: 'New report assigned to you', time: now, kind: 'new', reportId };
-                  setNotifs(prev => [item, ...prev].slice(0, 30));
-                  unseenRef.current += 1; setUnseen(unseenRef.current);
+                  // Refresh notifications from server so dropdown reflects new one
+                  await loadNotifications();
                 }
               } else if (evt.type === 'report:update') {
                 // Keep UI fresh if my assignments updated
                 const report = evt.report;
                 if (report?.responderId && meRef.current?.id && report.responderId === meRef.current.id) {
                   await load();
-                  const now = Date.now();
-                  const reportId = report?.id || report?._id;
-                  const id = `upd-${reportId || now}`;
-                  const item: Notif = { id, title: 'Assigned report was updated', time: now, kind: 'update', reportId };
-                  setNotifs(prev => [item, ...prev].slice(0, 30));
-                  unseenRef.current += 1; setUnseen(unseenRef.current);
+                  // Ensure updates also have sound for responder's assigned cases
+                  playNotificationSound();
+                  await loadNotifications();
                 }
               }
             } catch {}
@@ -173,13 +165,13 @@ export default function ResponderDashboard({ navigation }: ResponderDashProps) {
             sseActiveRef.current = false;
             try { es.close(); } catch {}
             es = null;
-            pollTimer = setInterval(load, 10000);
+            pollTimer = setInterval(async () => { await load(); await loadNotifications(); }, 10000);
           };
         } else {
-          pollTimer = setInterval(load, 10000);
+          pollTimer = setInterval(async () => { await load(); await loadNotifications(); }, 10000);
         }
       } catch {
-        pollTimer = setInterval(load, 10000);
+        pollTimer = setInterval(async () => { await load(); await loadNotifications(); }, 10000);
       }
     };
 
@@ -226,8 +218,21 @@ export default function ResponderDashboard({ navigation }: ResponderDashProps) {
     setReports([...list].sort((a, b) => Number(b?.createdAt ?? 0) - Number(a?.createdAt ?? 0)));
   };
 
+  // Load notifications from server and update unseen count
+  const loadNotifications = async () => {
+    try {
+      const userId = meRef.current?.id || (await getCurrentUser())?.id;
+      if (!userId) return;
+      const items = await listNotifications(userId);
+      const sorted = [...items].sort((a, b) => Number(new Date(b.createdAt || 0)) - Number(new Date(a.createdAt || 0)));
+      setNotifs(sorted);
+      const unread = sorted.filter(n => !n.read).length;
+      unseenRef.current = unread; setUnseen(unread);
+    } catch {}
+  };
+
   useEffect(() => {
-    const unsub = navigation.addListener('focus', load);
+    const unsub = navigation.addListener('focus', async () => { await load(); await loadNotifications(); });
     return unsub;
   }, [navigation]);
 
@@ -244,7 +249,7 @@ export default function ResponderDashboard({ navigation }: ResponderDashProps) {
   };
 
   // Open report details from a notification, close dropdown, and remove the clicked notif
-  const handleNotifPress = async (n: Notif) => {
+  const handleNotifPress = async (n: NotificationItem) => {
     let target: Report | null = null;
     if (n.reportId) {
       target = reports.find(r => String(r.id) === String(n.reportId)) || null;
@@ -258,12 +263,17 @@ export default function ResponderDashboard({ navigation }: ResponderDashProps) {
       }
     }
     // Remove clicked notification and close dropdown
-    setNotifs(prev => prev.filter(x => x.id !== n.id));
-    // Decrement unseen counter per click (but not below 0)
-    if (unseenRef.current > 0) {
-      unseenRef.current = Math.max(0, unseenRef.current - 1);
-      setUnseen(unseenRef.current);
-    }
+    // Mark as read on server if unread
+    try {
+      if (!n.read) {
+        await markNotificationRead(n.id, true);
+        setNotifs(prev => prev.map(x => x.id === n.id ? { ...x, read: true } : x));
+        if (unseenRef.current > 0) {
+          unseenRef.current = Math.max(0, unseenRef.current - 1);
+          setUnseen(unseenRef.current);
+        }
+      }
+    } catch {}
     setNotifOpen(false);
     if (target) setDetailReport(target);
   };
@@ -435,7 +445,7 @@ export default function ResponderDashboard({ navigation }: ResponderDashProps) {
           <View style={{ position: 'relative' }}>
             <TouchableOpacity
               style={styles.bellBtn}
-              onPress={() => { setNotifOpen(o => !o); if (!notifOpen) { unseenRef.current = 0; setUnseen(0); } }}
+              onPress={() => { setNotifOpen(o => !o); }}
               activeOpacity={0.8}
             >
               <Text style={styles.bellIcon}>🔔</Text>
@@ -448,15 +458,53 @@ export default function ResponderDashboard({ navigation }: ResponderDashProps) {
                 {notifs.length === 0 ? (
                   <Text style={styles.emptyText}>No notifications yet</Text>
                 ) : (
-                  notifs.map(n => (
-                    <TouchableOpacity key={n.id} style={styles.notifItem} onPress={() => handleNotifPress(n)} activeOpacity={0.85}>
-                      <Text style={[styles.notifDot, { color: n.kind === 'new' ? '#ffd166' : '#66d9ef' }]}>•</Text>
-                      <View style={{ flex: 1 }}>
-                        <Text style={styles.notifTitle}>{n.title}</Text>
-                        <Text style={styles.notifTime}>{new Date(n.time).toLocaleTimeString()}</Text>
-                      </View>
-                    </TouchableOpacity>
-                  ))
+                  <>
+                    <View style={{ paddingHorizontal: 12, paddingBottom: 6, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+                      <Text style={{ color: '#a0a0a0', fontWeight: '700' }}>Notifications</Text>
+                      {unseen > 0 && (
+                        <TouchableOpacity onPress={async () => {
+                          try {
+                            const uid = meRef.current?.id || (await getCurrentUser())?.id;
+                            if (!uid) return;
+                            await markAllNotificationsRead(uid);
+                            setNotifs(prev => prev.map(x => ({ ...x, read: true })));
+                            unseenRef.current = 0; setUnseen(0);
+                          } catch {}
+                        }} activeOpacity={0.8}>
+                          <Text style={{ color: '#66d9ef', fontWeight: '800' }}>Mark all as read</Text>
+                        </TouchableOpacity>
+                      )}
+                    </View>
+                    {notifs.map(n => (
+                      <TouchableOpacity key={n.id} style={[styles.notifItem, { opacity: n.read ? 0.7 : 1 }]} onPress={() => handleNotifPress(n)} activeOpacity={0.85}>
+                        <Text style={[styles.notifDot, { color: n.kind === 'new' ? '#ffd166' : '#66d9ef' }]}>•</Text>
+                        <View style={{ flex: 1 }}>
+                          <Text style={[styles.notifTitle, { fontWeight: n.read ? '600' : '800' }]}>{n.title}</Text>
+                          <Text style={styles.notifTime}>{n.createdAt ? new Date(n.createdAt as any).toLocaleTimeString() : ''}</Text>
+                        </View>
+                        <TouchableOpacity onPress={async () => {
+                          try {
+                            const next = !n.read; await markNotificationRead(n.id, next);
+                            setNotifs(prev => prev.map(x => x.id === n.id ? { ...x, read: next } : x));
+                            const delta = next ? -1 : +1; // if marking read, decrement unseen; if unread, increment
+                            unseenRef.current = Math.max(0, unseenRef.current + delta);
+                            setUnseen(unseenRef.current);
+                          } catch {}
+                        }} style={{ paddingHorizontal: 8, paddingVertical: 4 }} activeOpacity={0.7}>
+                          <Text style={{ color: '#ffd166', fontWeight: '800' }}>{n.read ? 'Unread' : 'Read'}</Text>
+                        </TouchableOpacity>
+                        <TouchableOpacity onPress={async () => {
+                          try {
+                            await deleteNotification(n.id);
+                            setNotifs(prev => prev.filter(x => x.id !== n.id));
+                            if (!n.read && unseenRef.current > 0) { unseenRef.current -= 1; setUnseen(unseenRef.current); }
+                          } catch {}
+                        }} style={{ paddingHorizontal: 8, paddingVertical: 4 }} activeOpacity={0.7}>
+                          <Text style={{ color: '#d90429', fontWeight: '800' }}>Delete</Text>
+                        </TouchableOpacity>
+                      </TouchableOpacity>
+                    ))}
+                  </>
                 )}
               </View>
             )}

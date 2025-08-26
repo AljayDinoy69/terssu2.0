@@ -32,6 +32,16 @@ export type Report = {
   personsInvolved?: string;
 };
 
+export type Notification = {
+  id: string;
+  userId: string;
+  title: string;
+  reportId?: string;
+  kind: 'new' | 'update';
+  read: boolean;
+  createdAt?: string | number;
+};
+
 const KEYS = {
   accounts: 'ERS_ACCOUNTS',
   session: 'ERS_SESSION',
@@ -147,4 +157,24 @@ export async function updateReportStatus(reportId: string, status: ReportStatus)
 export async function listAllReports() {
   const { reports } = await api.get<{ reports: Report[] }>('/reports');
   return reports;
+}
+
+// Notifications
+export async function listNotifications(userId: string) {
+  const { notifications } = await api.get<{ notifications: Notification[] }>(`/notifications?userId=${encodeURIComponent(userId)}`);
+  return notifications;
+}
+
+export async function markNotificationRead(id: string, read: boolean) {
+  const { notification } = await api.patch<{ notification: Notification }>(`/notifications/${id}/read`, { read });
+  return notification;
+}
+
+export async function deleteNotification(id: string) {
+  await api.delete<void>(`/notifications/${id}`);
+}
+
+export async function markAllNotificationsRead(userId: string) {
+  const res = await api.post<{ ok: boolean }>(`/notifications/mark-all-read`, { userId });
+  return res.ok;
 }

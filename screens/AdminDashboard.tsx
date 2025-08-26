@@ -2,14 +2,14 @@ import React, { useEffect, useState, useRef } from 'react';
 import { View, Text, StyleSheet, FlatList, TouchableOpacity, TextInput, Alert, Animated, Dimensions, ScrollView, Image, Modal } from 'react-native';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { RootStackParamList } from '../navigation/AppNavigator';
-import { createResponder, deleteAccount, getCurrentUser, listAllReports, listUsers, logout } from '../utils/auth';
+import { createResponder, deleteAccount, getCurrentUser, listAllReports, listUsers, logout, listNotifications, markNotificationRead, deleteNotification, markAllNotificationsRead, Notification as NotificationItem } from '../utils/auth';
 import { API_BASE_URL } from '../utils/api';
 import { playNotificationSound } from '../utils/sound';
 import { isSoundEnabled, setSoundEnabled } from '../utils/settings';
 
 export type AdminDashProps = NativeStackScreenProps<RootStackParamList, 'AdminDashboard'>;
 
-type Notif = { id: string; title: string; time: number; kind: 'new' | 'update' };
+// Server-backed notifications
 
 const { width } = Dimensions.get('window');
 
@@ -28,10 +28,11 @@ export default function AdminDashboard({ navigation }: AdminDashProps) {
   const prevPendingRef = useRef<number>(0);
   const didInitRef = useRef<boolean>(false);
   const sseActiveRef = useRef<boolean>(false);
-  const [notifs, setNotifs] = useState<Notif[]>([]);
+  const [notifs, setNotifs] = useState<NotificationItem[]>([]);
   const [notifOpen, setNotifOpen] = useState(false);
   const unseenRef = useRef(0);
   const [unseen, setUnseen] = useState(0);
+  const [detailReport, setDetailReport] = useState<any | null>(null);
 
   // Animation values
   const fadeAnim = useRef(new Animated.Value(0)).current;
@@ -132,6 +133,7 @@ export default function AdminDashboard({ navigation }: AdminDashProps) {
 
     const start = async () => {
       try {
+        const me = await getCurrentUser();
         if (typeof (global as any).EventSource !== 'undefined') {
           es = new (global as any).EventSource(`${API_BASE_URL}/events`);
           es.onopen = () => { sseActiveRef.current = true; };
@@ -142,18 +144,12 @@ export default function AdminDashboard({ navigation }: AdminDashProps) {
               if (evt.type === 'report:new') {
                 await load();
                 playNotificationSound();
-                const now = Date.now();
-                const id = `new-${evt.report?._id || now}`;
-                const item: Notif = { id, title: 'New report received', time: now, kind: 'new' };
-                setNotifs(prev => [item, ...prev].slice(0, 30));
-                unseenRef.current += 1; setUnseen(unseenRef.current);
+                await loadNotifications();
               } else if (evt.type === 'report:update') {
                 await load();
-                const now = Date.now();
-                const id = `upd-${evt.report?._id || now}`;
-                const item: Notif = { id, title: 'Report status updated', time: now, kind: 'update' };
-                setNotifs(prev => [item, ...prev].slice(0, 30));
-                unseenRef.current += 1; setUnseen(unseenRef.current);
+                // Ensure updates also have sound
+                playNotificationSound();
+                await loadNotifications();
               }
             } catch {}
           };
@@ -162,15 +158,15 @@ export default function AdminDashboard({ navigation }: AdminDashProps) {
             sseActiveRef.current = false;
             try { es.close(); } catch {}
             es = null;
-            pollTimer = setInterval(load, 10000);
+            pollTimer = setInterval(async () => { await load(); await loadNotifications(); }, 10000);
           };
         } else {
           // Fallback polling every 10s
-          pollTimer = setInterval(load, 10000);
+          pollTimer = setInterval(async () => { await load(); await loadNotifications(); }, 10000);
         }
       } catch {
         // Any error -> fallback polling
-        pollTimer = setInterval(load, 10000);
+        pollTimer = setInterval(async () => { await load(); await loadNotifications(); }, 10000);
       }
     };
 
@@ -210,8 +206,20 @@ export default function AdminDashboard({ navigation }: AdminDashProps) {
     setReports([...all].sort((a, b) => Number(b?.createdAt ?? 0) - Number(a?.createdAt ?? 0)));
   };
 
+  const loadNotifications = async () => {
+    try {
+      const me = await getCurrentUser();
+      if (!me) return;
+      const items = await listNotifications(me.id);
+      const sorted = [...items].sort((a, b) => Number(new Date(b.createdAt || 0)) - Number(new Date(a.createdAt || 0)));
+      setNotifs(sorted);
+      const unread = sorted.filter(n => !n.read).length;
+      unseenRef.current = unread; setUnseen(unread);
+    } catch {}
+  };
+
   useEffect(() => {
-    const unsub = navigation.addListener('focus', load);
+    const unsub = navigation.addListener('focus', async () => { await load(); await loadNotifications(); });
     return unsub;
   }, [navigation]);
 
@@ -390,7 +398,7 @@ const renderReportCard = ({ item }: { item: any; index: number }) => (
           <View style={{ position: 'relative' }}>
             <TouchableOpacity
               style={styles.bellBtn}
-              onPress={() => { setNotifOpen(o => !o); if (!notifOpen) { unseenRef.current = 0; setUnseen(0); } }}
+              onPress={() => { setNotifOpen(o => !o); }}
               activeOpacity={0.8}
             >
               <Text style={styles.bellIcon}>🔔</Text>
@@ -403,15 +411,70 @@ const renderReportCard = ({ item }: { item: any; index: number }) => (
                 {notifs.length === 0 ? (
                   <Text style={styles.emptyText}>No notifications yet</Text>
                 ) : (
-                  notifs.map(n => (
-                    <View key={n.id} style={styles.notifItem}>
-                      <Text style={[styles.notifDot, { color: n.kind === 'new' ? '#ffd166' : '#66d9ef' }]}>•</Text>
-                      <View style={{ flex: 1 }}>
-                        <Text style={styles.notifTitle}>{n.title}</Text>
-                        <Text style={styles.notifTime}>{new Date(n.time).toLocaleTimeString()}</Text>
-                      </View>
+                  <>
+                    <View style={{ paddingHorizontal: 12, paddingBottom: 6, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+                      <Text style={{ color: '#a0a0a0', fontWeight: '700' }}>Notifications</Text>
+                      {unseen > 0 && (
+                        <TouchableOpacity onPress={async () => {
+                          try {
+                            const me = await getCurrentUser(); if (!me) return;
+                            await markAllNotificationsRead(me.id);
+                            setNotifs(prev => prev.map(x => ({ ...x, read: true })));
+                            unseenRef.current = 0; setUnseen(0);
+                          } catch {}
+                        }} activeOpacity={0.8}>
+                          <Text style={{ color: '#66d9ef', fontWeight: '800' }}>Mark all as read</Text>
+                        </TouchableOpacity>
+                      )}
                     </View>
-                  ))
+                    {notifs.map(n => (
+                      <TouchableOpacity key={n.id} style={[styles.notifItem, { opacity: n.read ? 0.7 : 1 }]} onPress={async () => {
+                        // Load report and open modal
+                        if (n.reportId) {
+                          const rep = reports.find(r => String(r.id) === String(n.reportId));
+                          if (rep) setDetailReport(rep);
+                          else {
+                            const all = await listAllReports();
+                            const found = all.find(r => String(r.id) === String(n.reportId)) || null;
+                            if (found) setDetailReport(found);
+                          }
+                        }
+                        try {
+                          if (!n.read) {
+                            await markNotificationRead(n.id, true);
+                            setNotifs(prev => prev.map(x => x.id === n.id ? { ...x, read: true } : x));
+                            if (unseenRef.current > 0) { unseenRef.current -= 1; setUnseen(unseenRef.current); }
+                          }
+                        } catch {}
+                        setNotifOpen(false);
+                      }} activeOpacity={0.85}>
+                        <Text style={[styles.notifDot, { color: n.kind === 'new' ? '#ffd166' : '#66d9ef' }]}>•</Text>
+                        <View style={{ flex: 1 }}>
+                          <Text style={[styles.notifTitle, { fontWeight: n.read ? '600' : '800' }]}>{n.title}</Text>
+                          <Text style={styles.notifTime}>{n.createdAt ? new Date(n.createdAt as any).toLocaleTimeString() : ''}</Text>
+                        </View>
+                        <TouchableOpacity onPress={async () => {
+                          try {
+                            const next = !n.read; await markNotificationRead(n.id, next);
+                            setNotifs(prev => prev.map(x => x.id === n.id ? { ...x, read: next } : x));
+                            unseenRef.current = Math.max(0, unseenRef.current + (next ? -1 : 1));
+                            setUnseen(unseenRef.current);
+                          } catch {}
+                        }} style={{ paddingHorizontal: 8, paddingVertical: 4 }} activeOpacity={0.7}>
+                          <Text style={{ color: '#ffd166', fontWeight: '800' }}>{n.read ? 'Unread' : 'Read'}</Text>
+                        </TouchableOpacity>
+                        <TouchableOpacity onPress={async () => {
+                          try {
+                            await deleteNotification(n.id);
+                            setNotifs(prev => prev.filter(x => x.id !== n.id));
+                            if (!n.read && unseenRef.current > 0) { unseenRef.current -= 1; setUnseen(unseenRef.current); }
+                          } catch {}
+                        }} style={{ paddingHorizontal: 8, paddingVertical: 4 }} activeOpacity={0.7}>
+                          <Text style={{ color: '#d90429', fontWeight: '800' }}>Delete</Text>
+                        </TouchableOpacity>
+                      </TouchableOpacity>
+                    ))}
+                  </>
                 )}
               </View>
             )}

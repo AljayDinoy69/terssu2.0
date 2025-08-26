@@ -2,7 +2,8 @@ import React, { useEffect, useState, useRef } from 'react';
 import { View, Text, StyleSheet, FlatList, TouchableOpacity, RefreshControl, TextInput, Alert, Animated, Dimensions, ScrollView } from 'react-native';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { RootStackParamList } from '../navigation/AppNavigator';
-import { getCurrentUser, listReportsByUser, logout, Report } from '../utils/auth';
+import { getCurrentUser, listReportsByUser, logout, Report, listNotifications, markNotificationRead, deleteNotification, markAllNotificationsRead, Notification as NotificationItem } from '../utils/auth';
+import { API_BASE_URL } from '../utils/api';
 import { playNotificationSound } from '../utils/sound';
 import { isSoundEnabled, setSoundEnabled } from '../utils/settings';
 
@@ -19,6 +20,11 @@ export default function UserDashboard({ navigation }: UserDashProps) {
   const [soundEnabled, setSoundEnabledState] = useState<boolean>(true);
   const prevPendingRef = useRef<number>(0);
   const didInitRef = useRef<boolean>(false);
+  const [notifs, setNotifs] = useState<NotificationItem[]>([]);
+  const [notifOpen, setNotifOpen] = useState(false);
+  const unseenRef = useRef(0);
+  const [unseen, setUnseen] = useState(0);
+  const sseActiveRef = useRef<boolean>(false);
 
   // Animation values
   const fadeAnim = useRef(new Animated.Value(0)).current;
@@ -100,6 +106,86 @@ export default function UserDashboard({ navigation }: UserDashProps) {
     }
   }, [reports]);
 
+  // SSE subscription (with polling fallback)
+  useEffect(() => {
+    let es: any = null;
+    let pollTimer: any = null;
+    const start = async () => {
+      try {
+        const me = await getCurrentUser();
+        if (!me) return;
+        if (typeof (global as any).EventSource !== 'undefined') {
+          es = new (global as any).EventSource(`${API_BASE_URL}/events`);
+          es.onopen = () => { sseActiveRef.current = true; };
+          es.onmessage = async (ev: MessageEvent) => {
+            try {
+              const evt = JSON.parse((ev as any).data);
+              if (!evt || !evt.type) return;
+              if (evt.type === 'report:new' || evt.type === 'report:update') {
+                await load();
+                await loadNotifications();
+                if (evt.type === 'report:new') {
+                  playNotificationSound();
+                } else if (evt.type === 'report:update') {
+                  // If this update concerns the logged-in user's report, play a sound
+                  if (evt.report && String(evt.report.userId || '') === String(me.id)) {
+                    playNotificationSound();
+                  }
+                }
+              }
+            } catch {}
+          };
+          es.onerror = () => {
+            sseActiveRef.current = false;
+            try { es.close(); } catch {}
+            es = null;
+            let prevUnread = unseenRef.current;
+            pollTimer = setInterval(async () => {
+              await load();
+              const unread = await loadNotifications();
+              if (typeof unread === 'number') {
+                if (unread > prevUnread) {
+                  playNotificationSound();
+                }
+                prevUnread = unread;
+              }
+            }, 10000);
+          };
+        } else {
+          let prevUnread = unseenRef.current;
+          pollTimer = setInterval(async () => {
+            await load();
+            const unread = await loadNotifications();
+            if (typeof unread === 'number') {
+              if (unread > prevUnread) {
+                playNotificationSound();
+              }
+              prevUnread = unread;
+            }
+          }, 10000);
+        }
+      } catch {
+        let prevUnread = unseenRef.current;
+        pollTimer = setInterval(async () => {
+          await load();
+          const unread = await loadNotifications();
+          if (typeof unread === 'number') {
+            if (unread > prevUnread) {
+              playNotificationSound();
+            }
+            prevUnread = unread;
+          }
+        }, 10000);
+      }
+    };
+    start();
+    return () => {
+      sseActiveRef.current = false;
+      if (es) { try { es.close(); } catch {} }
+      if (pollTimer) clearInterval(pollTimer);
+    };
+  }, []);
+
   useEffect(() => {
     // Menu animation
     Animated.timing(menuAnimation, {
@@ -121,8 +207,21 @@ export default function UserDashboard({ navigation }: UserDashProps) {
     setReports([...list].sort((a, b) => Number(b?.createdAt ?? 0) - Number(a?.createdAt ?? 0)));
   };
 
+  const loadNotifications = async (): Promise<number | void> => {
+    try {
+      const me = await getCurrentUser();
+      if (!me) return;
+      const items = await listNotifications(me.id);
+      const sorted = [...items].sort((a, b) => Number(new Date(b.createdAt || 0)) - Number(new Date(a.createdAt || 0)));
+      setNotifs(sorted);
+      const unread = sorted.filter(n => !n.read).length;
+      unseenRef.current = unread; setUnseen(unread);
+      return unread;
+    } catch {}
+  };
+
   useEffect(() => {
-    const unsub = navigation.addListener('focus', load);
+    const unsub = navigation.addListener('focus', async () => { await load(); await loadNotifications(); });
     return unsub;
   }, [navigation]);
 
@@ -228,26 +327,101 @@ export default function UserDashboard({ navigation }: UserDashProps) {
           <Text style={styles.title}>📊 My Reports</Text>
           <Text style={styles.subtitle}>Emergency Response Dashboard</Text>
         </View>
-        <TouchableOpacity 
-          style={styles.menuBtn} 
-          onPress={() => setMenuOpen(v => !v)}
-          activeOpacity={0.8}
-        >
-          <Animated.View
-            style={{
-              transform: [
-                {
-                  rotate: menuAnimation.interpolate({
-                    inputRange: [0, 1],
-                    outputRange: ['0deg', '180deg'],
-                  }),
-                },
-              ],
-            }}
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+          <View style={{ position: 'relative' }}>
+            <TouchableOpacity style={styles.menuBtn} onPress={() => setNotifOpen(o => !o)} activeOpacity={0.8}>
+              <Text style={styles.menuBtnText}>🔔</Text>
+              {unseen > 0 && (<View style={styles.badge}><Text style={styles.badgeText}>{unseen}</Text></View>)}
+            </TouchableOpacity>
+            {notifOpen && (
+              <View style={styles.dropdown}>
+                {notifs.length === 0 ? (
+                  <Text style={styles.emptyText}>No notifications yet</Text>
+                ) : (
+                  <>
+                    <View style={{ paddingHorizontal: 12, paddingBottom: 6, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+                      <Text style={{ color: '#a0a0a0', fontWeight: '700' }}>Notifications</Text>
+                      {unseen > 0 && (
+                        <TouchableOpacity onPress={async () => {
+                          try {
+                            const me = await getCurrentUser(); if (!me) return;
+                            await markAllNotificationsRead(me.id);
+                            setNotifs(prev => prev.map(x => ({ ...x, read: true })));
+                            unseenRef.current = 0; setUnseen(0);
+                          } catch {}
+                        }} activeOpacity={0.8}>
+                          <Text style={{ color: '#66d9ef', fontWeight: '800' }}>Mark all as read</Text>
+                        </TouchableOpacity>
+                      )}
+                    </View>
+                    {notifs.map(n => (
+                      <TouchableOpacity key={n.id} style={[styles.notifItem, { opacity: n.read ? 0.7 : 1 }]} onPress={async () => {
+                        try {
+                          if (!n.read) {
+                            await markNotificationRead(n.id, true);
+                            setNotifs(prev => prev.map(x => x.id === n.id ? { ...x, read: true } : x));
+                            if (unseenRef.current > 0) { unseenRef.current -= 1; setUnseen(unseenRef.current); }
+                          }
+                        } catch {}
+                        // Optionally show quick info; deep link modal can be added later
+                        if (n.reportId) {
+                          const rep = reports.find(r => String(r.id) === String(n.reportId));
+                          if (rep) Alert.alert('Report', `${rep.type} — ${rep.status}`);
+                        }
+                        setNotifOpen(false);
+                      }} activeOpacity={0.85}>
+                        <Text style={[styles.notifDot, { color: n.kind === 'new' ? '#ffd166' : '#66d9ef' }]}>•</Text>
+                        <View style={{ flex: 1 }}>
+                          <Text style={[styles.notifTitle, { fontWeight: n.read ? '600' : '800' }]}>{n.title}</Text>
+                          <Text style={styles.notifTime}>{n.createdAt ? new Date(n.createdAt as any).toLocaleTimeString() : ''}</Text>
+                        </View>
+                        <TouchableOpacity onPress={async () => {
+                          try {
+                            const next = !n.read; await markNotificationRead(n.id, next);
+                            setNotifs(prev => prev.map(x => x.id === n.id ? { ...x, read: next } : x));
+                            unseenRef.current = Math.max(0, unseenRef.current + (next ? -1 : 1));
+                            setUnseen(unseenRef.current);
+                          } catch {}
+                        }} style={{ paddingHorizontal: 8, paddingVertical: 4 }} activeOpacity={0.7}>
+                          <Text style={{ color: '#ffd166', fontWeight: '800' }}>{n.read ? 'Unread' : 'Read'}</Text>
+                        </TouchableOpacity>
+                        <TouchableOpacity onPress={async () => {
+                          try {
+                            await deleteNotification(n.id);
+                            setNotifs(prev => prev.filter(x => x.id !== n.id));
+                            if (!n.read && unseenRef.current > 0) { unseenRef.current -= 1; setUnseen(unseenRef.current); }
+                          } catch {}
+                        }} style={{ paddingHorizontal: 8, paddingVertical: 4 }} activeOpacity={0.7}>
+                          <Text style={{ color: '#d90429', fontWeight: '800' }}>Delete</Text>
+                        </TouchableOpacity>
+                      </TouchableOpacity>
+                    ))}
+                  </>
+                )}
+              </View>
+            )}
+          </View>
+          <TouchableOpacity 
+            style={styles.menuBtn} 
+            onPress={() => setMenuOpen(v => !v)}
+            activeOpacity={0.8}
           >
-            <Text style={styles.menuBtnText}>☰</Text>
-          </Animated.View>
-        </TouchableOpacity>
+            <Animated.View
+              style={{
+                transform: [
+                  {
+                    rotate: menuAnimation.interpolate({
+                      inputRange: [0, 1],
+                      outputRange: ['0deg', '180deg'],
+                    }),
+                  },
+                ],
+              }}
+            >
+              <Text style={styles.menuBtnText}>☰</Text>
+            </Animated.View>
+          </TouchableOpacity>
+        </View>
       </Animated.View>
 
       {/* Menu Overlay */}
@@ -467,6 +641,7 @@ const styles = StyleSheet.create({
     flex: 1, 
     backgroundColor: '#0f0f23' 
   },
+
   backgroundPattern: {
     position: 'absolute',
     top: 0,
@@ -512,6 +687,23 @@ const styles = StyleSheet.create({
     fontSize: 18, 
     fontWeight: '800' 
   },
+  badge: {
+    position: 'absolute',
+    top: -6,
+    right: -6,
+    backgroundColor: '#d90429',
+    borderRadius: 10,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    minWidth: 18,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  badgeText: {
+    color: '#fff',
+    fontSize: 10,
+    fontWeight: '900',
+  },
   menuOverlay: { 
     position: 'absolute', 
     top: 0, 
@@ -544,6 +736,41 @@ const styles = StyleSheet.create({
     shadowRadius: 10, 
     elevation: 40, 
     overflow: 'hidden' 
+  },
+  dropdown: {
+    position: 'absolute',
+    right: 0,
+    top: 50,
+    width: Math.min(width * 0.9, 320),
+    backgroundColor: '#0f0f23',
+    borderWidth: 1,
+    borderColor: '#333',
+    borderRadius: 10,
+    paddingVertical: 6,
+    zIndex: 2000,
+    elevation: 50,
+  },
+  notifItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    borderBottomWidth: 1,
+    borderBottomColor: '#1f1f35',
+  },
+  notifDot: {
+    fontSize: 18,
+    marginRight: 6,
+  },
+  notifTitle: {
+    color: '#fff',
+    fontSize: 13,
+  },
+  notifTime: {
+    color: '#888',
+    fontSize: 10,
+    marginTop: 2,
   },
   menuItem: { 
     paddingVertical: 12, 
