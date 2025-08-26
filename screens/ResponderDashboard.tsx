@@ -1,5 +1,6 @@
 import React, { useEffect, useState, useRef } from 'react';
 import { View, Text, StyleSheet, FlatList, TouchableOpacity, Alert, Image, ScrollView, Animated, Dimensions, Modal } from 'react-native';
+import * as Location from 'expo-location';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { RootStackParamList } from '../navigation/AppNavigator';
 import { getCurrentUser, listAssignedReports, logout, Report, updateReportStatus, ReportStatus, listUsers } from '../utils/auth';
@@ -12,7 +13,7 @@ export type ResponderDashProps = NativeStackScreenProps<RootStackParamList, 'Res
 
 const { width } = Dimensions.get('window');
 
-type Notif = { id: string; title: string; time: number; kind: 'new' | 'update' };
+type Notif = { id: string; title: string; time: number; kind: 'new' | 'update'; reportId?: string };
 
 const nextStatus: Record<ReportStatus, ReportStatus> = {
   'Pending': 'In-progress',
@@ -35,6 +36,11 @@ export default function ResponderDashboard({ navigation }: ResponderDashProps) {
   const [notifOpen, setNotifOpen] = useState(false);
   const unseenRef = useRef(0);
   const [unseen, setUnseen] = useState(0);
+  // Map modal state
+  const [mapOpen, setMapOpen] = useState(false);
+  const [incidentCoord, setIncidentCoord] = useState<{ lat: number; lon: number } | null>(null);
+  const [myCoord, setMyCoord] = useState<{ lat: number; lon: number } | null>(null);
+  const [mapError, setMapError] = useState<string | null>(null);
 
   // Animation values
   const fadeAnim = useRef(new Animated.Value(0)).current;
@@ -142,8 +148,9 @@ export default function ResponderDashboard({ navigation }: ResponderDashProps) {
                   // Only beep for new Pending assigned to me
                   if (report.status === 'Pending') playNotificationSound();
                   const now = Date.now();
-                  const id = `new-${report?._id || now}`;
-                  const item: Notif = { id, title: 'New report assigned to you', time: now, kind: 'new' };
+                  const reportId = report?.id || report?._id;
+                  const id = `new-${reportId || now}`;
+                  const item: Notif = { id, title: 'New report assigned to you', time: now, kind: 'new', reportId };
                   setNotifs(prev => [item, ...prev].slice(0, 30));
                   unseenRef.current += 1; setUnseen(unseenRef.current);
                 }
@@ -153,8 +160,9 @@ export default function ResponderDashboard({ navigation }: ResponderDashProps) {
                 if (report?.responderId && meRef.current?.id && report.responderId === meRef.current.id) {
                   await load();
                   const now = Date.now();
-                  const id = `upd-${report?._id || now}`;
-                  const item: Notif = { id, title: 'Assigned report was updated', time: now, kind: 'update' };
+                  const reportId = report?.id || report?._id;
+                  const id = `upd-${reportId || now}`;
+                  const item: Notif = { id, title: 'Assigned report was updated', time: now, kind: 'update', reportId };
                   setNotifs(prev => [item, ...prev].slice(0, 30));
                   unseenRef.current += 1; setUnseen(unseenRef.current);
                 }
@@ -233,6 +241,31 @@ export default function ResponderDashboard({ navigation }: ResponderDashProps) {
   const onLogout = async () => {
     await logout();
     navigation.reset({ index: 0, routes: [{ name: 'Home' }] });
+  };
+
+  // Open report details from a notification, close dropdown, and remove the clicked notif
+  const handleNotifPress = async (n: Notif) => {
+    let target: Report | null = null;
+    if (n.reportId) {
+      target = reports.find(r => String(r.id) === String(n.reportId)) || null;
+      if (!target && meRef.current?.id) {
+        try {
+          const fresh = await listAssignedReports(meRef.current.id);
+          // Update local state for consistency
+          setReports([...fresh].sort((a, b) => Number(b?.createdAt ?? 0) - Number(a?.createdAt ?? 0)));
+          target = fresh.find(r => String(r.id) === String(n.reportId)) || null;
+        } catch {}
+      }
+    }
+    // Remove clicked notification and close dropdown
+    setNotifs(prev => prev.filter(x => x.id !== n.id));
+    // Decrement unseen counter per click (but not below 0)
+    if (unseenRef.current > 0) {
+      unseenRef.current = Math.max(0, unseenRef.current - 1);
+      setUnseen(unseenRef.current);
+    }
+    setNotifOpen(false);
+    if (target) setDetailReport(target);
   };
 
   const pending = reports.filter(r => r.status === 'Pending');
@@ -339,6 +372,55 @@ export default function ResponderDashboard({ navigation }: ResponderDashProps) {
   // Determine list based on selected tab
   const activeList = activeTab === 'pending' ? pending : activeTab === 'active' ? active : completed;
 
+  // Parse "lat, lon" string
+  const parseLocation = (text?: string): { lat: number; lon: number } | null => {
+    if (!text) return null;
+    const parts = text.split(',').map(s => s.trim());
+    if (parts.length < 2) return null;
+    const lat = Number(parts[0]);
+    const lon = Number(parts[1]);
+    if (Number.isFinite(lat) && Number.isFinite(lon)) return { lat, lon };
+    return null;
+  };
+
+  // Haversine distance in km
+  const distanceKm = (a: { lat: number; lon: number }, b: { lat: number; lon: number }) => {
+    const R = 6371;
+    const dLat = (b.lat - a.lat) * Math.PI / 180;
+    const dLon = (b.lon - a.lon) * Math.PI / 180;
+    const la1 = a.lat * Math.PI / 180;
+    const la2 = b.lat * Math.PI / 180;
+    const x = Math.sin(dLat/2) ** 2 + Math.cos(la1) * Math.cos(la2) * Math.sin(dLon/2) ** 2;
+    const c = 2 * Math.atan2(Math.sqrt(x), Math.sqrt(1 - x));
+    return R * c;
+  };
+
+  const openLocationModal = async (report: Report) => {
+    setMapError(null);
+    const inc = parseLocation(report.location);
+    if (!inc) {
+      setMapError('Invalid incident location');
+      setIncidentCoord(null);
+      setMyCoord(null);
+      setMapOpen(true);
+      return;
+    }
+    setIncidentCoord(inc);
+    try {
+      const { status } = await Location.requestForegroundPermissionsAsync();
+      if (status !== 'granted') {
+        setMapError('Location permission not granted');
+        setMyCoord(null);
+      } else {
+        const loc = await Location.getCurrentPositionAsync({});
+        setMyCoord({ lat: loc.coords.latitude, lon: loc.coords.longitude });
+      }
+    } catch (e: any) {
+      setMapError(e?.message || 'Unable to get current location');
+    }
+    setMapOpen(true);
+  };
+
   return (
     <View style={styles.container}>
       <View style={styles.backgroundPattern} />
@@ -367,13 +449,13 @@ export default function ResponderDashboard({ navigation }: ResponderDashProps) {
                   <Text style={styles.emptyText}>No notifications yet</Text>
                 ) : (
                   notifs.map(n => (
-                    <View key={n.id} style={styles.notifItem}>
+                    <TouchableOpacity key={n.id} style={styles.notifItem} onPress={() => handleNotifPress(n)} activeOpacity={0.85}>
                       <Text style={[styles.notifDot, { color: n.kind === 'new' ? '#ffd166' : '#66d9ef' }]}>•</Text>
                       <View style={{ flex: 1 }}>
                         <Text style={styles.notifTitle}>{n.title}</Text>
                         <Text style={styles.notifTime}>{new Date(n.time).toLocaleTimeString()}</Text>
                       </View>
-                    </View>
+                    </TouchableOpacity>
                   ))
                 )}
               </View>
@@ -606,6 +688,9 @@ export default function ResponderDashboard({ navigation }: ResponderDashProps) {
             )}
 
             <View style={styles.modalActionsRow}>
+              <TouchableOpacity style={styles.viewBtn} onPress={() => detailReport && openLocationModal(detailReport)}>
+                <Text style={styles.viewBtnText}>🗺️ View Location</Text>
+              </TouchableOpacity>
               <TouchableOpacity style={styles.cancelBtn} onPress={() => setDetailReport(null)}>
                 <Text style={styles.cancelBtnText}>Close</Text>
               </TouchableOpacity>
@@ -622,6 +707,70 @@ export default function ResponderDashboard({ navigation }: ResponderDashProps) {
                   </Text>
                 </TouchableOpacity>
               )}
+            </View>
+          </View>
+        </View>
+      </Modal>
+
+      {/* Location Modal */}
+      <Modal
+        visible={mapOpen}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setMapOpen(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.mapModalContent}>
+            <Text style={styles.modalTitle}>Incident & My Location</Text>
+            {mapError ? (
+              <Text style={styles.mapErrorText}>⚠️ {mapError}</Text>
+            ) : null}
+            <View style={styles.mapBox}>
+              {/* Simple schematic plotting both points relatively */}
+              {(() => {
+                if (!incidentCoord) return null;
+                const inc = incidentCoord;
+                const me = myCoord;
+                // Define a small bounding box using both points; fallback size
+                const lats = [inc.lat, me?.lat ?? inc.lat];
+                const lons = [inc.lon, me?.lon ?? inc.lon];
+                const minLat = Math.min(...lats);
+                const maxLat = Math.max(...lats);
+                const minLon = Math.min(...lons);
+                const maxLon = Math.max(...lons);
+                const pad = 0.0005; // tiny padding for visibility
+                const latSpan = Math.max(maxLat - minLat, 1e-6) + pad;
+                const lonSpan = Math.max(maxLon - minLon, 1e-6) + pad;
+                const W = 260, H = 180;
+                const toX = (lon: number) => ((lon - minLon) / lonSpan) * (W - 20) + 10;
+                const toY = (lat: number) => (H - 20) - ((lat - minLat) / latSpan) * (H - 20) + 10;
+                return (
+                  <>
+                    {/* Incident marker */}
+                    <View style={[styles.marker, { left: toX(inc.lon), top: toY(inc.lat), backgroundColor: '#d90429' }]} />
+                    <Text style={[styles.markerLabel, { left: toX(inc.lon) + 8, top: toY(inc.lat) - 6, color: '#d90429' }]}>Incident</Text>
+                    {/* My location marker */}
+                    {me && (
+                      <>
+                        <View style={[styles.marker, { left: toX(me.lon), top: toY(me.lat), backgroundColor: '#00aaff' }]} />
+                        <Text style={[styles.markerLabel, { left: toX(me.lon) + 8, top: toY(me.lat) - 6, color: '#00aaff' }]}>Me</Text>
+                      </>
+                    )}
+                  </>
+                );
+              })()}
+            </View>
+            <View style={styles.mapLegend}>
+              <Text style={styles.mapLegendText}>📍 Incident: {incidentCoord ? `${incidentCoord.lat.toFixed(5)}, ${incidentCoord.lon.toFixed(5)}` : 'N/A'}</Text>
+              <Text style={styles.mapLegendText}>👤 Me: {myCoord ? `${myCoord.lat.toFixed(5)}, ${myCoord.lon.toFixed(5)}` : 'N/A'}</Text>
+              {incidentCoord && myCoord ? (
+                <Text style={styles.mapLegendText}>📏 Distance: {distanceKm(incidentCoord, myCoord).toFixed(2)} km</Text>
+              ) : null}
+            </View>
+            <View style={styles.modalActionsRow}>
+              <TouchableOpacity style={styles.cancelBtn} onPress={() => setMapOpen(false)}>
+                <Text style={styles.cancelBtnText}>Close</Text>
+              </TouchableOpacity>
             </View>
           </View>
         </View>
@@ -965,6 +1114,50 @@ const styles = StyleSheet.create({
     fontSize: 16,
     color: '#999',
     textAlign: 'center',
+  },
+  mapModalContent: {
+    backgroundColor: '#1a1a2e',
+    padding: 16,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#333',
+    width: Math.min(width * 0.9, 340),
+  },
+  mapBox: {
+    height: 180,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: '#333',
+    backgroundColor: '#0f0f23',
+    marginTop: 8,
+    marginBottom: 12,
+    overflow: 'hidden',
+    position: 'relative',
+    alignSelf: 'center',
+    width: 260,
+  },
+  marker: {
+    position: 'absolute',
+    width: 10,
+    height: 10,
+    borderRadius: 5,
+  },
+  markerLabel: {
+    position: 'absolute',
+    fontSize: 10,
+    fontWeight: '700',
+  },
+  mapLegend: {
+    gap: 4,
+  },
+  mapLegendText: {
+    color: '#ccc',
+    fontSize: 12,
+  },
+  mapErrorText: {
+    color: '#ffd166',
+    fontSize: 12,
+    marginBottom: 8,
   },
   tabsRow: {
     flexDirection: 'row',

@@ -16,7 +16,7 @@ export default function ReportScreen({ navigation, route }: ReportProps) {
   const [description, setDescription] = useState(''); // optional
   const [locationText, setLocationText] = useState('');
   const [photoUri, setPhotoUri] = useState<string | undefined>();
-  const [responderId, setResponderId] = useState('');
+  const [selectedResponderIds, setSelectedResponderIds] = useState<string[]>([]);
   const [responders, setResponders] = useState<{ id: string; name: string }[]>([]);
   const [loading, setLoading] = useState(false);
   // New fields
@@ -130,14 +130,15 @@ export default function ReportScreen({ navigation, route }: ReportProps) {
     const required = [chiefComplaint, contactNo, personsInvolved, locationText];
     const filledFields = required.filter(field => field.length > 0).length;
     const denominator = required.length + 1; // +1 for responder selection
-    const progress = responderId ? (filledFields + 1) / denominator : filledFields / denominator;
+    const hasSelectedResponder = selectedResponderIds.length > 0;
+    const progress = hasSelectedResponder ? (filledFields + 1) / denominator : filledFields / denominator;
     
     Animated.timing(progressAnim, {
       toValue: progress,
       duration: 300,
       useNativeDriver: false,
     }).start();
-  }, [chiefComplaint, contactNo, personsInvolved, locationText, responderId]);
+  }, [chiefComplaint, contactNo, personsInvolved, locationText, selectedResponderIds]);
 
   // Photo animation
   useEffect(() => {
@@ -157,7 +158,6 @@ export default function ReportScreen({ navigation, route }: ReportProps) {
     (async () => {
       const list = await listResponders();
       setResponders(list.map(r => ({ id: r.id, name: r.name })));
-      if (list.length) setResponderId(list[0].id);
 
       const { status } = await Location.requestForegroundPermissionsAsync();
       if (status === 'granted') {
@@ -201,7 +201,7 @@ export default function ReportScreen({ navigation, route }: ReportProps) {
       }),
     ]).start();
 
-    if (!chiefComplaint || !contactNo || !personsInvolved || !locationText || !responderId) {
+    if (!chiefComplaint || !contactNo || !personsInvolved || !locationText || selectedResponderIds.length === 0) {
       return Alert.alert('Missing fields', 'Please complete all required fields');
     }
     try {
@@ -218,20 +218,25 @@ export default function ReportScreen({ navigation, route }: ReportProps) {
           Alert.alert('Photo upload failed', err?.message || 'Unable to upload image. The report will be submitted without a photo.');
         }
       }
-      await createReport({
-        // Server requires 'type'; use selected chief complaint as the type
-        type: chiefComplaint || 'Emergency',
-        description, // optional
-        location: locationText,
-        photoUrl, // preferred; server also maps legacy photoUri
-        responderId,
-        userId,
-        fullName: fullName || undefined,
-        contactNo,
-        chiefComplaint,
-        personsInvolved,
-      });
-      Alert.alert('Submitted', 'Your report has been submitted');
+      // Create one report per selected responder (server supports single responderId per report)
+      await Promise.all(
+        selectedResponderIds.map((rid) =>
+          createReport({
+            // Server requires 'type'; use selected chief complaint as the type
+            type: chiefComplaint || 'Emergency',
+            description, // optional
+            location: locationText,
+            photoUrl, // preferred; server also maps legacy photoUri
+            responderId: rid,
+            userId,
+            fullName: fullName || undefined,
+            contactNo,
+            chiefComplaint,
+            personsInvolved,
+          })
+        )
+      );
+      Alert.alert('Submitted', 'Your report has been sent to selected responders');
       if (userId) navigation.reset({ index: 0, routes: [{ name: 'UserDashboard' }] });
       else navigation.reset({ index: 0, routes: [{ name: 'Home' }] });
     } catch (e: any) {
@@ -242,21 +247,10 @@ export default function ReportScreen({ navigation, route }: ReportProps) {
   };
 
   const handleResponderPress = (id: string) => {
-    // Responder button animation
-    const scaleAnim = new Animated.Value(1);
-    Animated.sequence([
-      Animated.timing(scaleAnim, {
-        toValue: 0.9,
-        duration: 100,
-        useNativeDriver: true,
-      }),
-      Animated.timing(scaleAnim, {
-        toValue: 1,
-        duration: 100,
-        useNativeDriver: true,
-      }),
-    ]).start();
-    setResponderId(id);
+    // Toggle selection for multi-select
+    setSelectedResponderIds((prev) =>
+      prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]
+    );
   };
 
   // Removed incident icon helper since incident type field was removed
@@ -458,14 +452,14 @@ export default function ReportScreen({ navigation, route }: ReportProps) {
               },
             ]}
           >
-            <Text style={styles.sectionTitle}>🚑 Select Emergency Responder</Text>
+            <Text style={styles.sectionTitle}>🚑 Select Emergency Responder(s)</Text>
             <View style={styles.responderGrid}>
               {responders.map((r, index) => (
                 <TouchableOpacity
                   key={r.id}
                   style={[
                     styles.responderBtn,
-                    responderId === r.id && styles.responderBtnActive
+                    selectedResponderIds.includes(r.id) && styles.responderBtnActive
                   ]}
                   onPress={() => handleResponderPress(r.id)}
                   activeOpacity={0.8}
@@ -474,11 +468,11 @@ export default function ReportScreen({ navigation, route }: ReportProps) {
                     <Text style={styles.responderIcon}>👨‍⚕️</Text>
                     <Text style={[
                       styles.responderName,
-                      responderId === r.id && styles.responderNameActive
+                      selectedResponderIds.includes(r.id) && styles.responderNameActive
                     ]}>
                       {r.name}
                     </Text>
-                    {responderId === r.id && (
+                    {selectedResponderIds.includes(r.id) && (
                       <View style={styles.responderCheck}>
                         <Text style={styles.responderCheckIcon}>✓</Text>
                       </View>
@@ -541,7 +535,7 @@ export default function ReportScreen({ navigation, route }: ReportProps) {
             style={[
               styles.submitBtn,
               loading && styles.submitBtnDisabled,
-              (chiefComplaint && contactNo && personsInvolved && locationText && responderId) && styles.submitBtnReady
+              (chiefComplaint && contactNo && personsInvolved && locationText && selectedResponderIds.length > 0) && styles.submitBtnReady
             ]}
             onPress={onSubmit}
             disabled={loading}
@@ -551,7 +545,7 @@ export default function ReportScreen({ navigation, route }: ReportProps) {
               <Text style={styles.submitBtnText}>
                 {loading ? '📤 Submitting Report...' : '🚀 Submit Emergency Report'}
               </Text>
-              {!loading && (chiefComplaint && contactNo && personsInvolved && locationText && responderId) && (
+              {!loading && (chiefComplaint && contactNo && personsInvolved && locationText && selectedResponderIds.length > 0) && (
                 <View style={styles.buttonGlow} />
               )}
             </View>
