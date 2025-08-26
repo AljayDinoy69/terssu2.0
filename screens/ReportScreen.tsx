@@ -12,7 +12,7 @@ export type ReportProps = NativeStackScreenProps<RootStackParamList, 'Report'>;
 const { width } = Dimensions.get('window');
 
 export default function ReportScreen({ navigation, route }: ReportProps) {
-  const [incidentType, setIncidentType] = useState('');
+  // Removed incidentType per request
   const [description, setDescription] = useState(''); // optional
   const [locationText, setLocationText] = useState('');
   const [photoUri, setPhotoUri] = useState<string | undefined>();
@@ -24,6 +24,21 @@ export default function ReportScreen({ navigation, route }: ReportProps) {
   const [contactNo, setContactNo] = useState('');
   const [chiefComplaint, setChiefComplaint] = useState('');
   const [personsInvolved, setPersonsInvolved] = useState('');
+  const [showChiefOptions, setShowChiefOptions] = useState(false);
+  const [showPersonsOptions, setShowPersonsOptions] = useState(false);
+
+  const chiefComplaintOptions = [
+    'Breathing difficulty',
+    'Chest pain',
+    'Severe bleeding',
+    'Burn',
+    'Trauma/Injury',
+    'Unconscious',
+    'Seizure',
+    'Allergic reaction',
+    'Other',
+  ];
+  const personsCountOptions = [...Array.from({ length: 9 }, (_, i) => String(i + 1)), '10+'];
 
   const isAnonymous = route.params?.anonymous;
 
@@ -112,7 +127,7 @@ export default function ReportScreen({ navigation, route }: ReportProps) {
   // Update progress based on filled fields
   useEffect(() => {
     // Required fields exclude optional ones (fullName, description, photo)
-    const required = [incidentType, chiefComplaint, contactNo, personsInvolved, locationText];
+    const required = [chiefComplaint, contactNo, personsInvolved, locationText];
     const filledFields = required.filter(field => field.length > 0).length;
     const denominator = required.length + 1; // +1 for responder selection
     const progress = responderId ? (filledFields + 1) / denominator : filledFields / denominator;
@@ -122,7 +137,7 @@ export default function ReportScreen({ navigation, route }: ReportProps) {
       duration: 300,
       useNativeDriver: false,
     }).start();
-  }, [incidentType, chiefComplaint, contactNo, personsInvolved, locationText, responderId]);
+  }, [chiefComplaint, contactNo, personsInvolved, locationText, responderId]);
 
   // Photo animation
   useEffect(() => {
@@ -186,7 +201,7 @@ export default function ReportScreen({ navigation, route }: ReportProps) {
       }),
     ]).start();
 
-    if (!incidentType || !chiefComplaint || !contactNo || !personsInvolved || !locationText || !responderId) {
+    if (!chiefComplaint || !contactNo || !personsInvolved || !locationText || !responderId) {
       return Alert.alert('Missing fields', 'Please complete all required fields');
     }
     try {
@@ -204,7 +219,8 @@ export default function ReportScreen({ navigation, route }: ReportProps) {
         }
       }
       await createReport({
-        type: incidentType,
+        // Server requires 'type'; use selected chief complaint as the type
+        type: chiefComplaint || 'Emergency',
         description, // optional
         location: locationText,
         photoUrl, // preferred; server also maps legacy photoUri
@@ -243,15 +259,7 @@ export default function ReportScreen({ navigation, route }: ReportProps) {
     setResponderId(id);
   };
 
-  const getIncidentIcon = (type: string) => {
-    const lowerType = type.toLowerCase();
-    if (lowerType.includes('fire')) return '🔥';
-    if (lowerType.includes('medical') || lowerType.includes('health')) return '🏥';
-    if (lowerType.includes('theft') || lowerType.includes('crime')) return '🚨';
-    if (lowerType.includes('accident') || lowerType.includes('crash')) return '🚗';
-    if (lowerType.includes('flood') || lowerType.includes('water')) return '🌊';
-    return '⚠️';
-  };
+  // Removed incident icon helper since incident type field was removed
 
   return (
     <View style={styles.container}>
@@ -328,26 +336,7 @@ export default function ReportScreen({ navigation, route }: ReportProps) {
             </View>
           </Animated.View>
 
-          {/* Incident Type */}
-          <Animated.View style={{ transform: [{ scale: inputAnimations[1] }] }}>
-            <View style={styles.inputContainer}>
-              <Text style={styles.inputLabel}>
-                {incidentType ? getIncidentIcon(incidentType) : '⚠️'} Incident Type
-              </Text>
-              <TextInput
-                value={incidentType}
-                onChangeText={setIncidentType}
-                placeholder="e.g., Fire, Medical Emergency, Theft"
-                style={[styles.input, incidentType.length > 0 && styles.inputFilled]}
-                placeholderTextColor="#999"
-              />
-              {incidentType.length > 0 && (
-                <View style={styles.inputSuccess}>
-                  <Text style={styles.successIcon}>✓</Text>
-                </View>
-              )}
-            </View>
-          </Animated.View>
+          {/* Incident Type removed per request */}
 
           {/* Contact No. */}
           <Animated.View style={{ transform: [{ scale: inputAnimations[2] }] }}>
@@ -369,17 +358,32 @@ export default function ReportScreen({ navigation, route }: ReportProps) {
             </View>
           </Animated.View>
 
-          {/* Chief Complaint */}
+          {/* Chief Complaint (Dropdown) */}
           <Animated.View style={{ transform: [{ scale: inputAnimations[3] }] }}>
             <View style={styles.inputContainer}>
               <Text style={styles.inputLabel}>🆘 Chief Complaint</Text>
-              <TextInput
-                value={chiefComplaint}
-                onChangeText={setChiefComplaint}
-                placeholder="Primary issue (e.g., severe chest pain)"
-                style={[styles.input, chiefComplaint.length > 0 && styles.inputFilled]}
-                placeholderTextColor="#999"
-              />
+              <TouchableOpacity
+                style={[styles.input, chiefComplaint.length > 0 && styles.inputFilled, styles.inputSelect]}
+                onPress={() => setShowChiefOptions(prev => !prev)}
+                activeOpacity={0.8}
+              >
+                <Text style={{ color: chiefComplaint ? '#fff' : '#999' }}>
+                  {chiefComplaint || 'Select chief complaint'}
+                </Text>
+              </TouchableOpacity>
+              {showChiefOptions && (
+                <View style={styles.dropdown}>
+                  {chiefComplaintOptions.map(opt => (
+                    <TouchableOpacity
+                      key={opt}
+                      style={styles.dropdownOption}
+                      onPress={() => { setChiefComplaint(opt); setShowChiefOptions(false); }}
+                    >
+                      <Text style={styles.dropdownOptionText}>{opt}</Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+              )}
               {chiefComplaint.length > 0 && (
                 <View style={styles.inputSuccess}>
                   <Text style={styles.successIcon}>✓</Text>
@@ -388,17 +392,32 @@ export default function ReportScreen({ navigation, route }: ReportProps) {
             </View>
           </Animated.View>
 
-          {/* Persons Involved */}
+          {/* Persons Involved (Dropdown for count) */}
           <Animated.View style={{ transform: [{ scale: inputAnimations[4] }] }}>
             <View style={styles.inputContainer}>
               <Text style={styles.inputLabel}>👥 Persons Involved</Text>
-              <TextInput
-                value={personsInvolved}
-                onChangeText={setPersonsInvolved}
-                placeholder="Names/number of persons involved"
-                style={[styles.input, personsInvolved.length > 0 && styles.inputFilled]}
-                placeholderTextColor="#999"
-              />
+              <TouchableOpacity
+                style={[styles.input, personsInvolved.length > 0 && styles.inputFilled, styles.inputSelect]}
+                onPress={() => setShowPersonsOptions(prev => !prev)}
+                activeOpacity={0.8}
+              >
+                <Text style={{ color: personsInvolved ? '#fff' : '#999' }}>
+                  {personsInvolved || 'Select number of persons'}
+                </Text>
+              </TouchableOpacity>
+              {showPersonsOptions && (
+                <View style={styles.dropdown}>
+                  {personsCountOptions.map(opt => (
+                    <TouchableOpacity
+                      key={opt}
+                      style={styles.dropdownOption}
+                      onPress={() => { setPersonsInvolved(opt); setShowPersonsOptions(false); }}
+                    >
+                      <Text style={styles.dropdownOptionText}>{opt}</Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+              )}
               {personsInvolved.length > 0 && (
                 <View style={styles.inputSuccess}>
                   <Text style={styles.successIcon}>✓</Text>
@@ -426,6 +445,47 @@ export default function ReportScreen({ navigation, route }: ReportProps) {
                   <Text style={styles.successIcon}>✓</Text>
                 </View>
               )}
+            </View>
+          </Animated.View>
+
+           {/* Responder Selection */}
+          <Animated.View
+            style={[
+              styles.responderContainer,
+              {
+                opacity: responderAnim,
+                transform: [{ scale: responderAnim }],
+              },
+            ]}
+          >
+            <Text style={styles.sectionTitle}>🚑 Select Emergency Responder</Text>
+            <View style={styles.responderGrid}>
+              {responders.map((r, index) => (
+                <TouchableOpacity
+                  key={r.id}
+                  style={[
+                    styles.responderBtn,
+                    responderId === r.id && styles.responderBtnActive
+                  ]}
+                  onPress={() => handleResponderPress(r.id)}
+                  activeOpacity={0.8}
+                >
+                  <View style={styles.responderContent}>
+                    <Text style={styles.responderIcon}>👨‍⚕️</Text>
+                    <Text style={[
+                      styles.responderName,
+                      responderId === r.id && styles.responderNameActive
+                    ]}>
+                      {r.name}
+                    </Text>
+                    {responderId === r.id && (
+                      <View style={styles.responderCheck}>
+                        <Text style={styles.responderCheckIcon}>✓</Text>
+                      </View>
+                    )}
+                  </View>
+                </TouchableOpacity>
+              ))}
             </View>
           </Animated.View>
 
@@ -475,54 +535,13 @@ export default function ReportScreen({ navigation, route }: ReportProps) {
           </Animated.View>
         </View>
 
-        {/* Responder Selection */}
-        <Animated.View
-          style={[
-            styles.responderContainer,
-            {
-              opacity: responderAnim,
-              transform: [{ scale: responderAnim }],
-            },
-          ]}
-        >
-          <Text style={styles.sectionTitle}>🚑 Select Emergency Responder</Text>
-          <View style={styles.responderGrid}>
-            {responders.map((r, index) => (
-              <TouchableOpacity
-                key={r.id}
-                style={[
-                  styles.responderBtn,
-                  responderId === r.id && styles.responderBtnActive
-                ]}
-                onPress={() => handleResponderPress(r.id)}
-                activeOpacity={0.8}
-              >
-                <View style={styles.responderContent}>
-                  <Text style={styles.responderIcon}>👨‍⚕️</Text>
-                  <Text style={[
-                    styles.responderName,
-                    responderId === r.id && styles.responderNameActive
-                  ]}>
-                    {r.name}
-                  </Text>
-                  {responderId === r.id && (
-                    <View style={styles.responderCheck}>
-                      <Text style={styles.responderCheckIcon}>✓</Text>
-                    </View>
-                  )}
-                </View>
-              </TouchableOpacity>
-            ))}
-          </View>
-        </Animated.View>
-
         {/* Submit Button */}
         <Animated.View style={{ transform: [{ scale: buttonScale }] }}>
           <TouchableOpacity
             style={[
               styles.submitBtn,
               loading && styles.submitBtnDisabled,
-              (incidentType && chiefComplaint && contactNo && personsInvolved && locationText && responderId) && styles.submitBtnReady
+              (chiefComplaint && contactNo && personsInvolved && locationText && responderId) && styles.submitBtnReady
             ]}
             onPress={onSubmit}
             disabled={loading}
@@ -532,7 +551,7 @@ export default function ReportScreen({ navigation, route }: ReportProps) {
               <Text style={styles.submitBtnText}>
                 {loading ? '📤 Submitting Report...' : '🚀 Submit Emergency Report'}
               </Text>
-              {!loading && (incidentType && chiefComplaint && contactNo && personsInvolved && locationText && responderId) && (
+              {!loading && (chiefComplaint && contactNo && personsInvolved && locationText && responderId) && (
                 <View style={styles.buttonGlow} />
               )}
             </View>
@@ -648,6 +667,27 @@ const styles = StyleSheet.create({
   },
   inputDisabled: {
     opacity: 0.6,
+  },
+  inputSelect: {
+    justifyContent: 'center',
+  },
+  dropdown: {
+    marginTop: 8,
+    borderWidth: 2,
+    borderColor: '#333',
+    borderRadius: 8,
+    backgroundColor: '#1a1a2e',
+    overflow: 'hidden',
+  },
+  dropdownOption: {
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: '#222',
+  },
+  dropdownOptionText: {
+    color: '#fff',
+    fontSize: 14,
   },
   textArea: {
     height: 100,

@@ -1,7 +1,7 @@
 {
   "expo": {
-    "name": "pro",
-    "slug": "pro",
+    "name": "ERS - Emergency Responce System",
+    "slug": "ERS - Emergency Responce System",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",

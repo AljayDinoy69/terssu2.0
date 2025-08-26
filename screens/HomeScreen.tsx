@@ -1,12 +1,13 @@
 import React, { useEffect, useRef } from 'react';
-import { View, Text, StyleSheet, Image, TouchableOpacity, Animated, Dimensions, ScrollView } from 'react-native';
+import { View, Text, StyleSheet, Image, TouchableOpacity, Animated, ScrollView, ImageBackground } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { RootStackParamList } from '../navigation/AppNavigator';
+// import { Header } from 'react-native/Libraries/NewAppScreen';
 
 export type HomeProps = NativeStackScreenProps<RootStackParamList, 'Home'>;
 
-const { width } = Dimensions.get('window');
+// removed unused width
 
 export default function HomeScreen({ navigation }: HomeProps) {
   // Animation values
@@ -17,6 +18,8 @@ export default function HomeScreen({ navigation }: HomeProps) {
   const buttonScale1 = useRef(new Animated.Value(0.9)).current;
   const buttonScale2 = useRef(new Animated.Value(0.9)).current;
   const buttonScale3 = useRef(new Animated.Value(0.9)).current;
+
+  // Notifications removed from HomeScreen
 
   useEffect(() => {
     // Entrance animations
@@ -92,6 +95,8 @@ export default function HomeScreen({ navigation }: HomeProps) {
     return () => pulseAnimation.stop();
   }, []);
 
+  // Notifications removed: no SSE on HomeScreen
+
   const logoRotateInterpolate = logoRotate.interpolate({
     inputRange: [0, 1],
     outputRange: ['0deg', '360deg'],
@@ -114,110 +119,119 @@ export default function HomeScreen({ navigation }: HomeProps) {
   };
 
   return (
-    <ScrollView style={styles.scroll} contentContainerStyle={styles.container}>
-      {/* Background gradient effect */}
-      <LinearGradient
-        colors={['#667eea', '#764ba2']}
-        start={{ x: 0, y: 0 }}
-        end={{ x: 1, y: 1 }}
-        style={styles.backgroundGradient}
-      />
-      
-      {/* Animated logo */}
-      <Animated.View
-        style={[
-          styles.logoContainer,
-          {
-            transform: [
-              { scale: logoScale },
-              { rotate: logoRotateInterpolate },
-            ],
-          },
-        ]}
-      >
-        <Image source={require('../assets/icon.png')} style={styles.logo} />
-        <View style={styles.logoGlow} />
-      </Animated.View>
+    <ImageBackground
+      source={require('../assets/back-wall.jpg')}
+      style={styles.bg}
+      resizeMode="cover"
+    >
+      {/* Header: notification bell removed */}
+      <ScrollView style={styles.scroll} contentContainerStyle={styles.container}>
+        {/* Background gradient effect */}
+        <LinearGradient
+          colors={['#667eea', '#764ba2']}
+          start={{ x: 0, y: 0 }}
+          end={{ x: 1, y: 1 }}
+          style={styles.backgroundGradient}
+        />
 
-      {/* Animated title */}
-      <Animated.View
-        style={{
-          opacity: fadeAnim,
-          transform: [{ translateY: slideAnim }],
-        }}
-      >
-        <Text style={styles.title}>ERS</Text>
-        <Text style={styles.subtitle}>Emergency Response System</Text>
-      </Animated.View>
-
-      {/* Animated buttons */}
-      <View style={styles.buttonContainer}>
-        <Animated.View style={{ transform: [{ scale: buttonScale1 }] }}>
+        {/* Animated title */}
+        <Animated.View
+          style={{
+            opacity: fadeAnim,
+            transform: [{ translateY: slideAnim }],
+          }}
+        >
+          <Text style={styles.title}>ERS</Text>
+          <Text style={styles.subtitle}>Emergency Response System</Text>
+        </Animated.View>
+        
+        {/* Animated logo */}
+        <Animated.View
+          style={[
+            styles.logoContainer,
+            {
+              transform: [
+                { scale: logoScale },
+                { rotate: logoRotateInterpolate },
+              ],
+            },
+          ]}
+        >
           <TouchableOpacity
-            style={[styles.primaryBtn, styles.buttonShadow]}
-            onPress={() => handleButtonPress(buttonScale1, () => navigation.navigate('Report', { anonymous: true }))}
-            activeOpacity={0.8}
-          >
-            <View style={styles.buttonContent}>
-              <Text style={styles.btnText}>🚨 Report as Anonymous</Text>
-              <View style={styles.buttonHighlight} />
-            </View>
-          </TouchableOpacity>
+              style={[styles.primaryBtn, styles.buttonShadow]}
+              onPress={() => handleButtonPress(buttonScale1, () => navigation.navigate('Report', { anonymous: true }))}
+              activeOpacity={0.8}
+            >
+              <View style={styles.buttonContent}>
+                <Image source={require('../assets/icon.png')} style={styles.logo} />
+              </View>        
+            </TouchableOpacity>              
+        </Animated.View>
+        <Animated.View
+          style={{
+            opacity: fadeAnim,
+            transform: [{ translateY: slideAnim }],
+          }}
+        >
+        <Text style={styles.subtitle1}>Direct Report Here!</Text>
         </Animated.View>
 
-        <Animated.View style={{ transform: [{ scale: buttonScale2 }] }}>
-          <TouchableOpacity
-            style={[styles.secondaryBtn, styles.buttonShadow]}
-            onPress={() => handleButtonPress(buttonScale2, () => navigation.navigate('Login'))}
-            activeOpacity={0.8}
-          >
-            <View style={styles.buttonContent}>
-              <Text style={styles.btnText}>👤 Login</Text>
-              <View style={styles.buttonHighlight} />
+        {/* Animated buttons */}
+        <View style={styles.buttonContainer}>
+          <Animated.View style={{ transform: [{ scale: buttonScale2 }] }}>
+            <TouchableOpacity
+              style={[styles.secondaryBtn, styles.buttonShadow]}
+              onPress={() => handleButtonPress(buttonScale2, () => navigation.navigate('Login'))}
+              activeOpacity={0.8}
+            >
+              <View style={styles.buttonContent}>
+                <Text style={styles.btnText}>👤 Login</Text>
+                <View style={styles.buttonHighlight} />
+              </View>
+            </TouchableOpacity>
+          </Animated.View>
+
+          <Animated.View style={{ transform: [{ scale: buttonScale3 }] }}>
+            <TouchableOpacity
+              style={[styles.tertiaryBtn, styles.buttonShadow]}
+              onPress={() => handleButtonPress(buttonScale3, () => navigation.navigate('Signup'))}
+              activeOpacity={0.8}
+            >
+              <View style={styles.buttonContent}>
+                <Text style={styles.btnText}>✨ Signup</Text>
+                <View style={styles.buttonHighlight} />
+              </View>
+            </TouchableOpacity>
+          </Animated.View>
+        </View>
+        {/* Info Cards */}
+        <View style={styles.infoCards}>
+          <View style={[styles.infoCard, styles.cardShadow]}>
+            <Text style={styles.infoIcon}>🕒</Text>
+            <View style={styles.infoTextWrap}>
+              <Text style={styles.infoTitle}>24/7 Availability</Text>
+              <Text style={styles.infoDesc}>Report incidents anytime, anywhere with reliable uptime.</Text>
             </View>
-          </TouchableOpacity>
-        </Animated.View>
+          </View>
 
-        <Animated.View style={{ transform: [{ scale: buttonScale3 }] }}>
-          <TouchableOpacity
-            style={[styles.tertiaryBtn, styles.buttonShadow]}
-            onPress={() => handleButtonPress(buttonScale3, () => navigation.navigate('Signup'))}
-            activeOpacity={0.8}
-          >
-            <View style={styles.buttonContent}>
-              <Text style={styles.btnText}>✨ Signup</Text>
-              <View style={styles.buttonHighlight} />
+          <View style={[styles.infoCard, styles.cardShadow]}>
+            <Text style={styles.infoIcon}>📍</Text>
+            <View style={styles.infoTextWrap}>
+              <Text style={styles.infoTitle}>Accurate Geolocation</Text>
+              <Text style={styles.infoDesc}>Share precise location to speed up emergency response.</Text>
             </View>
-          </TouchableOpacity>
-        </Animated.View>
-      </View>
-      {/* Info Cards */}
-      <View style={styles.infoCards}>
-        <View style={[styles.infoCard, styles.cardShadow]}>
-          <Text style={styles.infoIcon}>🕒</Text>
-          <View style={styles.infoTextWrap}>
-            <Text style={styles.infoTitle}>24/7 Availability</Text>
-            <Text style={styles.infoDesc}>Report incidents anytime, anywhere with reliable uptime.</Text>
           </View>
-        </View>
 
-        <View style={[styles.infoCard, styles.cardShadow]}>
-          <Text style={styles.infoIcon}>📍</Text>
-          <View style={styles.infoTextWrap}>
-            <Text style={styles.infoTitle}>Accurate Geolocation</Text>
-            <Text style={styles.infoDesc}>Share precise location to speed up emergency response.</Text>
+          <View style={[styles.infoCard, styles.cardShadow]}>
+            <Text style={styles.infoIcon}>🔒</Text>
+            <View style={styles.infoTextWrap}>
+              <Text style={styles.infoTitle}>Privacy First</Text>
+              <Text style={styles.infoDesc}>Report anonymously or securely with your account.</Text>
+            </View>
           </View>
         </View>
-
-        <View style={[styles.infoCard, styles.cardShadow]}>
-          <Text style={styles.infoIcon}>🔒</Text>
-          <View style={styles.infoTextWrap}>
-            <Text style={styles.infoTitle}>Privacy First</Text>
-            <Text style={styles.infoDesc}>Report anonymously or securely with your account.</Text>
-          </View>
-        </View>
-      </View>
-    </ScrollView>
+      </ScrollView>
+    </ImageBackground>
   );
 }
 
@@ -227,8 +241,12 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     padding: 24,
-    backgroundColor: '#0f0f23',
+    backgroundColor: 'transparent',
   },
+  bg: {
+    flex: 1,
+  },
+  /* notification styles removed */
   scroll: {
     flex: 1,
     width: '100%',
@@ -243,7 +261,7 @@ const styles = StyleSheet.create({
   },
   logoContainer: {
     position: 'relative',
-    marginBottom: 32,
+    marginBottom: 0,
   },
   logo: {
     width: 120,
@@ -277,8 +295,16 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '300',
     textAlign: 'center',
-    color: '#a0a0a0',
-    marginBottom: 48,
+    color: 'white',
+    marginBottom: 20,
+    letterSpacing: 1,
+  },
+  subtitle1: {
+    fontSize: 16,
+    fontWeight: '300',
+    textAlign: 'center',
+    color: 'white',
+    marginBottom: 60,
     letterSpacing: 1,
   },
   buttonContainer: {

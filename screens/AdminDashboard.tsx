@@ -3,8 +3,13 @@ import { View, Text, StyleSheet, FlatList, TouchableOpacity, TextInput, Alert, A
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { RootStackParamList } from '../navigation/AppNavigator';
 import { createResponder, deleteAccount, getCurrentUser, listAllReports, listUsers, logout } from '../utils/auth';
+import { API_BASE_URL } from '../utils/api';
+import { playNotificationSound } from '../utils/sound';
+import { isSoundEnabled, setSoundEnabled } from '../utils/settings';
 
 export type AdminDashProps = NativeStackScreenProps<RootStackParamList, 'AdminDashboard'>;
+
+type Notif = { id: string; title: string; time: number; kind: 'new' | 'update' };
 
 const { width } = Dimensions.get('window');
 
@@ -16,9 +21,17 @@ export default function AdminDashboard({ navigation }: AdminDashProps) {
   const [userQuery, setUserQuery] = useState('');
   const [roleFilter, setRoleFilter] = useState<'all' | 'admin' | 'responder' | 'user'>('all');
   const [menuOpen, setMenuOpen] = useState(false);
+  const [soundEnabled, setSoundEnabledState] = useState<boolean>(true);
   const [detailUser, setDetailUser] = useState<any | null>(null);
   const [confirmTarget, setConfirmTarget] = useState<{ id: string; name: string } | null>(null);
   const [userSort, setUserSort] = useState<'name_asc' | 'name_desc' | 'role' | 'email'>('name_asc');
+  const prevPendingRef = useRef<number>(0);
+  const didInitRef = useRef<boolean>(false);
+  const sseActiveRef = useRef<boolean>(false);
+  const [notifs, setNotifs] = useState<Notif[]>([]);
+  const [notifOpen, setNotifOpen] = useState(false);
+  const unseenRef = useRef(0);
+  const [unseen, setUnseen] = useState(0);
 
   // Animation values
   const fadeAnim = useRef(new Animated.Value(0)).current;
@@ -76,6 +89,22 @@ export default function AdminDashboard({ navigation }: AdminDashProps) {
 
     // Pulse animation for urgent reports
     const urgentReports = reports.filter(r => isPending(r.status));
+    const pendingCount = urgentReports.length;
+    if (sseActiveRef.current) {
+      // When SSE is active, we avoid the count-based sound to prevent double beeps
+      prevPendingRef.current = pendingCount;
+      didInitRef.current = true;
+    } else if (!didInitRef.current) {
+      // Skip sound on initial load to avoid false alert
+      prevPendingRef.current = pendingCount;
+      didInitRef.current = true;
+    } else if (pendingCount > prevPendingRef.current) {
+      // New pending reports detected -> play notification sound
+      playNotificationSound();
+      prevPendingRef.current = pendingCount;
+    } else {
+      prevPendingRef.current = pendingCount;
+    }
     if (urgentReports.length > 0) {
       const pulse = Animated.loop(
         Animated.sequence([
@@ -96,6 +125,64 @@ export default function AdminDashboard({ navigation }: AdminDashProps) {
     }
   }, [reports]);
 
+  // SSE subscription (with polling fallback)
+  useEffect(() => {
+    let es: any = null;
+    let pollTimer: any = null;
+
+    const start = async () => {
+      try {
+        if (typeof (global as any).EventSource !== 'undefined') {
+          es = new (global as any).EventSource(`${API_BASE_URL}/events`);
+          es.onopen = () => { sseActiveRef.current = true; };
+          es.onmessage = async (ev: MessageEvent) => {
+            try {
+              const evt = JSON.parse((ev as any).data);
+              if (!evt || !evt.type) return;
+              if (evt.type === 'report:new') {
+                await load();
+                playNotificationSound();
+                const now = Date.now();
+                const id = `new-${evt.report?._id || now}`;
+                const item: Notif = { id, title: 'New report received', time: now, kind: 'new' };
+                setNotifs(prev => [item, ...prev].slice(0, 30));
+                unseenRef.current += 1; setUnseen(unseenRef.current);
+              } else if (evt.type === 'report:update') {
+                await load();
+                const now = Date.now();
+                const id = `upd-${evt.report?._id || now}`;
+                const item: Notif = { id, title: 'Report status updated', time: now, kind: 'update' };
+                setNotifs(prev => [item, ...prev].slice(0, 30));
+                unseenRef.current += 1; setUnseen(unseenRef.current);
+              }
+            } catch {}
+          };
+          es.onerror = () => {
+            // If the connection drops, fallback to polling
+            sseActiveRef.current = false;
+            try { es.close(); } catch {}
+            es = null;
+            pollTimer = setInterval(load, 10000);
+          };
+        } else {
+          // Fallback polling every 10s
+          pollTimer = setInterval(load, 10000);
+        }
+      } catch {
+        // Any error -> fallback polling
+        pollTimer = setInterval(load, 10000);
+      }
+    };
+
+    start();
+
+    return () => {
+      sseActiveRef.current = false;
+      if (es) { try { es.close(); } catch {} }
+      if (pollTimer) clearInterval(pollTimer);
+    };
+  }, []);
+
   const load = async () => {
     // Refresh animation
     Animated.sequence([
@@ -113,9 +200,14 @@ export default function AdminDashboard({ navigation }: AdminDashProps) {
 
     const me = await getCurrentUser();
     if (!me || me.role !== 'admin') return navigation.replace('Login');
+    // Load sound preference
+    try {
+      const pref = await isSoundEnabled();
+      setSoundEnabledState(pref);
+    } catch {}
     setUsers(await listUsers());
     const all = await listAllReports();
-    setReports([...all].sort((a, b) => (b?.createdAt || 0) - (a?.createdAt || 0)));
+    setReports([...all].sort((a, b) => Number(b?.createdAt ?? 0) - Number(a?.createdAt ?? 0)));
   };
 
   useEffect(() => {
@@ -192,108 +284,97 @@ export default function AdminDashboard({ navigation }: AdminDashProps) {
     }
   };
 
-  const stats = getStatsData();
+const stats = getStatsData();
 
-  const renderUserCard = ({ item, index }: { item: any; index: number }) => (
-    <Animated.View
-      style={[
-        styles.card,
-        {
-          opacity: listAnim,
-          transform: [
-            {
-              translateY: listAnim.interpolate({
-                inputRange: [0, 1],
-                outputRange: [50, 0],
-              }),
-            },
-          ],
-        },
-      ]}
-    >
-      <View style={styles.cardHeader}>
-        <View style={styles.roleContainer}>
-          <Text style={styles.roleIcon}>{getRoleIcon(item.role)}</Text>
-          <View style={[styles.roleBadge, { backgroundColor: item.role === 'admin' ? '#d90429' : '#667eea' }]}>
-            <Text style={styles.roleBadgeText}>{item.role.toUpperCase()}</Text>
-          </View>
+const renderUserCard = ({ item }: { item: any; index: number }) => (
+  <View style={styles.card}>
+    <View style={styles.cardHeader}>
+      <View style={styles.roleContainer}>
+        <Text style={styles.roleIcon}>{getRoleIcon(item.role)}</Text>
+        <View style={[styles.roleBadge, { backgroundColor: item.role === 'admin' ? '#d90429' : '#667eea' }]}>
+          <Text style={styles.roleBadgeText}>{item.role?.toUpperCase?.() || 'UNKNOWN'}</Text>
         </View>
       </View>
-      
-      <Text style={styles.cardTitle}>{item.name}</Text>
-      <Text style={styles.cardMeta}>📧 {item.email}</Text>
-      <Text style={styles.cardMeta}>📱 {item.phone}</Text>
-      
-      <View style={styles.actionRow}>
+    </View>
+
+    <Text style={styles.cardTitle}>{item.name}</Text>
+    {!!item.email && <Text style={styles.cardMeta}>📧 {item.email}</Text>}
+    {!!item.phone && <Text style={styles.cardMeta}>📱 {item.phone}</Text>}
+
+    <View style={styles.actionRow}>
+      <TouchableOpacity
+        style={styles.viewBtn}
+        onPress={() => setDetailUser(item)}
+        activeOpacity={0.85}
+      >
+        <Text style={styles.viewBtnText}>👁️ View Details</Text>
+      </TouchableOpacity>
+      {item.role !== 'admin' && (
         <TouchableOpacity
-          style={styles.viewBtn}
-          onPress={() => setDetailUser(item)}
+          style={styles.deleteBtn}
+          onPress={() => setConfirmTarget({ id: item.id, name: item.name })}
           activeOpacity={0.85}
         >
-          <Text style={styles.viewBtnText}>👁️ View Details</Text>
+          <Text style={styles.deleteBtnText}>🗑️ Delete</Text>
         </TouchableOpacity>
-        {item.role !== 'admin' && (
-          <TouchableOpacity
-            style={styles.deleteBtn}
-            onPress={() => setConfirmTarget({ id: item.id, name: item.name })}
-            activeOpacity={0.85}
-          >
-            <Text style={styles.deleteBtnText}>🗑️ Delete</Text>
-          </TouchableOpacity>
-        )}
-      </View>
-    </Animated.View>
-  );
+      )}
+    </View>
+  </View>
+);
 
-  const renderReportCard = ({ item, index }: { item: any; index: number }) => (
-    <Animated.View
-      style={[
-        styles.card,
-        styles.reportCard,
-        isPending(item.status) && { transform: [{ scale: pulseAnim }] },
-        {
-          opacity: listAnim,
-          transform: [
-            {
-              translateY: listAnim.interpolate({
-                inputRange: [0, 1],
-                outputRange: [50, 0],
-              }),
-            },
-            ...(isPending(item.status) ? [{ scale: pulseAnim }] : []),
-          ],
-        },
-      ]}
-    >
-      <View style={styles.reportHeader}>
-        <Text style={styles.reportType}>{item.type}</Text>
-        <View style={[styles.statusBadge, { backgroundColor: getStatusColor(item.status) }]}> 
-          <Text style={styles.statusText}>
-            {getStatusIcon(item.status)} {item.status?.toUpperCase() || 'UNKNOWN'}
-          </Text>
-        </View>
+const renderReportCard = ({ item }: { item: any; index: number }) => (
+  <View style={[styles.card, styles.reportCard]}>
+    <View style={styles.reportHeader}>
+      <Text style={styles.reportType}>{item.type}</Text>
+      <View style={[styles.statusBadge, { backgroundColor: getStatusColor(item.status) }]}>
+        <Text style={styles.statusText}>
+          {getStatusIcon(item.status)} {item.status?.toUpperCase?.() || 'UNKNOWN'}
+        </Text>
       </View>
-      
-      {!!item.chiefComplaint && (
-        <Text style={styles.reportDescription} numberOfLines={2} ellipsizeMode="tail">🆘 Chief Complaint: {item.chiefComplaint}</Text>
+    </View>
+
+    {!!item.chiefComplaint && (
+      <Text style={styles.reportDescription} numberOfLines={2} ellipsizeMode="tail">
+        🆘 Chief Complaint: {item.chiefComplaint}
+      </Text>
+    )}
+    {!!item.description && (
+      <Text style={styles.reportDescription} numberOfLines={3} ellipsizeMode="tail">
+        📝 {item.description}
+      </Text>
+    )}
+    {item.photoUri ? (
+      <Image source={{ uri: item.photoUri }} style={styles.thumbnail} resizeMode="cover" />
+    ) : null}
+
+    <View style={styles.reportDetails}>
+      {!!item.fullName && (
+        <Text style={styles.reportMeta} numberOfLines={1} ellipsizeMode="tail">
+          🙍 Full Name: {item.fullName}
+        </Text>
       )}
-      {!!item.description && (
-        <Text style={styles.reportDescription} numberOfLines={3} ellipsizeMode="tail">📝 {item.description}</Text>
+      {!!item.contactNo && (
+        <Text style={styles.reportMeta} numberOfLines={1} ellipsizeMode="tail">
+          📞 Contact: {item.contactNo}
+        </Text>
       )}
-      {item.photoUri ? (
-        <Image source={{ uri: item.photoUri }} style={styles.thumbnail} resizeMode="cover" />
-      ) : null}
-      
-      <View style={styles.reportDetails}>
-        {!!item.fullName && <Text style={styles.reportMeta}>🙍 Full Name: {item.fullName}</Text>}
-        {!!item.contactNo && <Text style={styles.reportMeta}>📞 Contact: {item.contactNo}</Text>}
-        {!!item.personsInvolved && <Text style={styles.reportMeta}>👥 Persons Involved: {item.personsInvolved}</Text>}
-        <Text style={styles.reportMeta}>👨‍⚕️ Responder: {item.responderId}</Text>
-        <Text style={styles.reportMeta}>👤 Reporter: {item.userId || 'Anonymous'}</Text>
-        <Text style={styles.reportMeta}>📅 Created: {item.createdAt ? new Date(item.createdAt).toLocaleString() : '—'}</Text>
-      </View>
-    </Animated.View>
-  );
+      {!!item.personsInvolved && (
+        <Text style={styles.reportMeta} numberOfLines={1} ellipsizeMode="tail">
+          👥 Persons Involved: {item.personsInvolved}
+        </Text>
+      )}
+      <Text style={styles.reportMeta} numberOfLines={1} ellipsizeMode="tail">
+        👨‍⚕️ Responder: {item.responderId}
+      </Text>
+      <Text style={styles.reportMeta} numberOfLines={1} ellipsizeMode="tail">
+        👤 Reporter: {item.userId || 'Anonymous'}
+      </Text>
+      <Text style={styles.reportMeta}>
+        📅 Created: {item.createdAt ? new Date(item.createdAt).toLocaleString() : '—'}
+      </Text>
+    </View>
+  </View>
+);
 
   return (
     <View style={styles.container}>
@@ -305,7 +386,36 @@ export default function AdminDashboard({ navigation }: AdminDashProps) {
           <Text style={styles.title}>⚡ Admin Dashboard</Text>
           <Text style={styles.subtitle}>Emergency Response Control</Text>
         </View>
-        <View>
+        <View style={styles.headerActions}>
+          <View style={{ position: 'relative' }}>
+            <TouchableOpacity
+              style={styles.bellBtn}
+              onPress={() => { setNotifOpen(o => !o); if (!notifOpen) { unseenRef.current = 0; setUnseen(0); } }}
+              activeOpacity={0.8}
+            >
+              <Text style={styles.bellIcon}>🔔</Text>
+              {unseen > 0 && (
+                <View style={styles.badge}><Text style={styles.badgeText}>{unseen}</Text></View>
+              )}
+            </TouchableOpacity>
+            {notifOpen && (
+              <View style={styles.dropdown}>
+                {notifs.length === 0 ? (
+                  <Text style={styles.emptyText}>No notifications yet</Text>
+                ) : (
+                  notifs.map(n => (
+                    <View key={n.id} style={styles.notifItem}>
+                      <Text style={[styles.notifDot, { color: n.kind === 'new' ? '#ffd166' : '#66d9ef' }]}>•</Text>
+                      <View style={{ flex: 1 }}>
+                        <Text style={styles.notifTitle}>{n.title}</Text>
+                        <Text style={styles.notifTime}>{new Date(n.time).toLocaleTimeString()}</Text>
+                      </View>
+                    </View>
+                  ))
+                )}
+              </View>
+            )}
+          </View>
           <TouchableOpacity style={styles.menuBtn} onPress={() => setMenuOpen(v => !v)} activeOpacity={0.8}>
             <Text style={styles.menuBtnText}>☰</Text>
           </TouchableOpacity>
@@ -322,6 +432,16 @@ export default function AdminDashboard({ navigation }: AdminDashProps) {
             </TouchableOpacity>
             <TouchableOpacity style={styles.menuItem} onPress={() => { setMenuOpen(false); Alert.alert('Settings', 'Coming soon'); }}>
               <Text style={styles.menuItemText}>⚙️ Settings</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={styles.menuItem}
+              onPress={async () => {
+                const next = !soundEnabled;
+                setSoundEnabledState(next);
+                await setSoundEnabled(next);
+              }}
+            >
+              <Text style={styles.menuItemText}>{soundEnabled ? '🔔 Sound: On' : '🔕 Sound: Off'}</Text>
             </TouchableOpacity>
             <TouchableOpacity style={styles.menuItem} onPress={() => { setMenuOpen(false); Alert.alert('About & Services', 'Coming soon'); }}>
               <Text style={styles.menuItemText}>ℹ️ About & Services</Text>
@@ -666,6 +786,80 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: '#a0a0a0',
     marginTop: 4,
+  },
+  headerActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  bellBtn: {
+    backgroundColor: '#2b2d42',
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    borderRadius: 8,
+  },
+  bellIcon: {
+    color: '#fff',
+    fontSize: 18,
+    fontWeight: '800',
+  },
+  badge: {
+    position: 'absolute',
+    top: -6,
+    right: -6,
+    backgroundColor: '#d90429',
+    minWidth: 18,
+    height: 18,
+    borderRadius: 9,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 4,
+    borderWidth: 1,
+    borderColor: '#111629',
+  },
+  badgeText: {
+    color: '#fff',
+    fontSize: 10,
+    fontWeight: '800',
+  },
+  dropdown: {
+    position: 'absolute',
+    right: 0,
+    top: 44,
+    backgroundColor: '#0f0f23',
+    borderWidth: 1,
+    borderColor: '#333',
+    borderRadius: 10,
+    width: Math.min(width * 0.8, 280),
+    maxHeight: 260,
+    paddingVertical: 8,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.3,
+    shadowRadius: 10,
+    elevation: 30,
+    zIndex: 2000,
+  },
+  notifItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: '#1f1f35',
+  },
+  notifDot: {
+    fontSize: 18,
+    marginRight: 2,
+  },
+  notifTitle: {
+    color: '#fff',
+    fontWeight: '700',
+  },
+  notifTime: {
+    color: '#999',
+    fontSize: 11,
   },
   logoutBtn: {
     backgroundColor: '#d90429',

@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { View, Text, TextInput, StyleSheet, TouchableOpacity, Alert, ScrollView, Animated, Dimensions, TextInputProps } from 'react-native';
+import { View, Text, TextInput, StyleSheet, TouchableOpacity, Alert, ScrollView, Animated, Dimensions, TextInputProps, ImageBackground } from 'react-native';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { RootStackParamList } from '../navigation/AppNavigator';
 import { signUpUser } from '../utils/auth';
@@ -67,6 +67,18 @@ export default function SignupScreen({ navigation }: SignupProps) {
       ]),
     ]).start();
   }, []);
+
+  // Ensure back always goes to Home
+  useEffect(() => {
+    const unsub = navigation.addListener('beforeRemove', (e) => {
+      const action: any = (e as any).data?.action;
+      if (action?.type === 'GO_BACK') {
+        e.preventDefault();
+        navigation.reset({ index: 0, routes: [{ name: 'Home' }] });
+      }
+    });
+    return unsub;
+  }, [navigation]);
 
   // Update progress based on filled fields
   useEffect(() => {
@@ -148,10 +160,15 @@ export default function SignupScreen({ navigation }: SignupProps) {
   ];
 
   return (
-    <View style={styles.container}>
-      <View style={styles.backgroundPattern} />
-      
-      <ScrollView contentContainerStyle={styles.scrollContainer} showsVerticalScrollIndicator={false}>
+    <ImageBackground
+      source={require('../assets/back-wall.jpg')}
+      style={styles.bg}
+      resizeMode="cover"
+    >
+      <View style={styles.container}>
+        <View style={styles.backgroundPattern} />
+        
+        <ScrollView contentContainerStyle={styles.scrollContainer} showsVerticalScrollIndicator={false}>
         {/* Animated Title */}
         <Animated.View style={[styles.titleContainer, { transform: [{ scale: titleScale }] }]}>
           <Text style={styles.title}>Create Account</Text>
@@ -262,6 +279,17 @@ export default function SignupScreen({ navigation }: SignupProps) {
             </TouchableOpacity>
           </Animated.View>
         </View>
+        
+        {/* Go to Login Link */}
+        <View style={styles.linksContainer}>
+          <TouchableOpacity
+            style={styles.linkBtn}
+            onPress={() => navigation.navigate('Login')}
+            activeOpacity={0.7}
+          >
+            <Text style={styles.linkText}>👤 Already have an account? Login</Text>
+          </TouchableOpacity>
+        </View>
 
         {/* Terms */}
         <Animated.View
@@ -277,15 +305,19 @@ export default function SignupScreen({ navigation }: SignupProps) {
             By creating an account, you agree to our Terms of Service and Privacy Policy
           </Text>
         </Animated.View>
-      </ScrollView>
-    </View>
+        </ScrollView>
+      </View>
+    </ImageBackground>
   );
 }
 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#0f0f23',
+    backgroundColor: 'transparent',
+  },
+  bg: {
+    flex: 1,
   },
   backgroundPattern: {
     position: 'absolute',
@@ -456,5 +488,22 @@ const styles = StyleSheet.create({
     color: '#666',
     textAlign: 'center',
     lineHeight: 18,
+  },
+  linksContainer: {
+    alignItems: 'center',
+  },
+  linkBtn: {
+    paddingVertical: 12,
+    paddingHorizontal: 18,
+    borderRadius: 8,
+    backgroundColor: 'rgba(255, 255, 255, 0.05)',
+    marginBottom: 12,
+    width: '100%',
+  },
+  linkText: {
+    color: '#667eea',
+    textAlign: 'center',
+    fontWeight: '600',
+    fontSize: 16,
   },
 });

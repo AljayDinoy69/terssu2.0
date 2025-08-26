@@ -3,11 +3,16 @@ import { View, Text, StyleSheet, FlatList, TouchableOpacity, Alert, Image, Scrol
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { RootStackParamList } from '../navigation/AppNavigator';
 import { getCurrentUser, listAssignedReports, logout, Report, updateReportStatus, ReportStatus, listUsers } from '../utils/auth';
+import { API_BASE_URL } from '../utils/api';
 import { listResponders } from '../utils/auth';
+import { playNotificationSound } from '../utils/sound';
+import { isSoundEnabled, setSoundEnabled } from '../utils/settings';
 
 export type ResponderDashProps = NativeStackScreenProps<RootStackParamList, 'ResponderDashboard'>;
 
 const { width } = Dimensions.get('window');
+
+type Notif = { id: string; title: string; time: number; kind: 'new' | 'update' };
 
 const nextStatus: Record<ReportStatus, ReportStatus> = {
   'Pending': 'In-progress',
@@ -21,6 +26,15 @@ export default function ResponderDashboard({ navigation }: ResponderDashProps) {
   const [activeTab, setActiveTab] = useState<'pending' | 'active' | 'completed'>('pending');
   const [detailReport, setDetailReport] = useState<Report | null>(null);
   const [nameMap, setNameMap] = useState<Record<string, string>>({});
+  const [soundEnabled, setSoundEnabledState] = useState<boolean>(true);
+  const prevPendingRef = useRef<number>(0);
+  const didInitRef = useRef<boolean>(false);
+  const sseActiveRef = useRef<boolean>(false);
+  const meRef = useRef<any>(null);
+  const [notifs, setNotifs] = useState<Notif[]>([]);
+  const [notifOpen, setNotifOpen] = useState(false);
+  const unseenRef = useRef(0);
+  const [unseen, setUnseen] = useState(0);
 
   // Animation values
   const fadeAnim = useRef(new Animated.Value(0)).current;
@@ -32,6 +46,7 @@ export default function ResponderDashboard({ navigation }: ResponderDashProps) {
   const menuAnimation = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
+
     // Entrance animations
     Animated.sequence([
       // Header animation
@@ -71,6 +86,19 @@ export default function ResponderDashboard({ navigation }: ResponderDashProps) {
 
     // Pulse animation for pending reports
     const pendingReports = reports.filter(r => r.status === 'Pending');
+    const pendingCount = pendingReports.length;
+    if (sseActiveRef.current) {
+      prevPendingRef.current = pendingCount;
+      didInitRef.current = true;
+    } else if (!didInitRef.current) {
+      prevPendingRef.current = pendingCount;
+      didInitRef.current = true;
+    } else if (pendingCount > prevPendingRef.current) {
+      playNotificationSound();
+      prevPendingRef.current = pendingCount;
+    } else {
+      prevPendingRef.current = pendingCount;
+    }
     if (pendingReports.length > 0) {
       const pulse = Animated.loop(
         Animated.sequence([
@@ -91,6 +119,71 @@ export default function ResponderDashboard({ navigation }: ResponderDashProps) {
     }
   }, [reports]);
 
+  // SSE subscription (with polling fallback)
+  useEffect(() => {
+    let es: any = null;
+    let pollTimer: any = null;
+
+    const start = async () => {
+      try {
+        const me = await getCurrentUser();
+        meRef.current = me;
+        if (typeof (global as any).EventSource !== 'undefined') {
+          es = new (global as any).EventSource(`${API_BASE_URL}/events`);
+          es.onopen = () => { sseActiveRef.current = true; };
+          es.onmessage = async (ev: MessageEvent) => {
+            try {
+              const evt = JSON.parse((ev as any).data);
+              if (!evt || !evt.type) return;
+              if (evt.type === 'report:new') {
+                const report = evt.report;
+                if (report?.responderId && meRef.current?.id && report.responderId === meRef.current.id) {
+                  await load();
+                  // Only beep for new Pending assigned to me
+                  if (report.status === 'Pending') playNotificationSound();
+                  const now = Date.now();
+                  const id = `new-${report?._id || now}`;
+                  const item: Notif = { id, title: 'New report assigned to you', time: now, kind: 'new' };
+                  setNotifs(prev => [item, ...prev].slice(0, 30));
+                  unseenRef.current += 1; setUnseen(unseenRef.current);
+                }
+              } else if (evt.type === 'report:update') {
+                // Keep UI fresh if my assignments updated
+                const report = evt.report;
+                if (report?.responderId && meRef.current?.id && report.responderId === meRef.current.id) {
+                  await load();
+                  const now = Date.now();
+                  const id = `upd-${report?._id || now}`;
+                  const item: Notif = { id, title: 'Assigned report was updated', time: now, kind: 'update' };
+                  setNotifs(prev => [item, ...prev].slice(0, 30));
+                  unseenRef.current += 1; setUnseen(unseenRef.current);
+                }
+              }
+            } catch {}
+          };
+          es.onerror = () => {
+            sseActiveRef.current = false;
+            try { es.close(); } catch {}
+            es = null;
+            pollTimer = setInterval(load, 10000);
+          };
+        } else {
+          pollTimer = setInterval(load, 10000);
+        }
+      } catch {
+        pollTimer = setInterval(load, 10000);
+      }
+    };
+
+    start();
+
+    return () => {
+      sseActiveRef.current = false;
+      if (es) { try { es.close(); } catch {} }
+      if (pollTimer) clearInterval(pollTimer);
+    };
+  }, []);
+
   useEffect(() => {
     // Menu animation
     Animated.timing(menuAnimation, {
@@ -103,7 +196,9 @@ export default function ResponderDashboard({ navigation }: ResponderDashProps) {
   const load = async () => {
     const user = await getCurrentUser();
     if (!user) return navigation.replace('Login');
+    meRef.current = user;
     const list = await listAssignedReports(user.id);
+
     // Build a map of account id -> name for nice display
     try {
       const [users, responders] = await Promise.all([listUsers(), listResponders()]);
@@ -115,7 +210,12 @@ export default function ResponderDashboard({ navigation }: ResponderDashProps) {
       // ignore mapping errors
       setNameMap({});
     }
-    setReports([...list].sort((a, b) => (b?.createdAt || 0) - (a?.createdAt || 0)));
+    // Load sound preference
+    try {
+      const pref = await isSoundEnabled();
+      setSoundEnabledState(pref);
+    } catch {}
+    setReports([...list].sort((a, b) => Number(b?.createdAt ?? 0) - Number(a?.createdAt ?? 0)));
   };
 
   useEffect(() => {
@@ -170,39 +270,9 @@ export default function ResponderDashboard({ navigation }: ResponderDashProps) {
 
   const stats = getStatsData();
 
-  const ReportCard: React.FC<{ item: Report; index: number; }> = ({ item, index }) => {
-    const itemAnimation = useRef(new Animated.Value(0)).current;
-
-    useEffect(() => {
-      Animated.timing(itemAnimation, {
-        toValue: 1,
-        duration: 500,
-        delay: index * 100,
-        useNativeDriver: true,
-      }).start();
-    }, [index, itemAnimation]);
-
-    const animatedStyle = {
-      opacity: itemAnimation,
-      transform: [
-        {
-          translateY: itemAnimation.interpolate({
-            inputRange: [0, 1],
-            outputRange: [50, 0],
-          }),
-        },
-        {
-          scale: itemAnimation.interpolate({
-            inputRange: [0, 1],
-            outputRange: [0.9, 1],
-          }),
-        },
-        ...(isPending(item.status) ? [{ scale: pulseAnim as any }] : []),
-      ],
-    } as any;
-
+  const ReportCard: React.FC<{ item: Report; index: number; }> = ({ item }) => {
     return (
-      <Animated.View style={[styles.card, animatedStyle]}>
+      <View style={styles.card}>
         <View style={styles.cardHeader}>
           <Text style={styles.cardTitle}>{item.type}</Text>
           <View style={[styles.statusBadge, { backgroundColor: getStatusColor(item.status) }]}>
@@ -262,7 +332,7 @@ export default function ResponderDashboard({ navigation }: ResponderDashProps) {
             <Text style={styles.viewBtnText}>👁️ View Details</Text>
           </TouchableOpacity>
         </View>
-      </Animated.View>
+      </View>
     );
   };
 
@@ -274,31 +344,55 @@ export default function ResponderDashboard({ navigation }: ResponderDashProps) {
       <View style={styles.backgroundPattern} />
       
       {/* Header */}
-      <Animated.View style={[styles.header, { transform: [{ scale: headerScale }] }]}>
+      <Animated.View style={[styles.header, { transform: [{ scale: headerScale }] }]}> 
         <View style={styles.headerContent}>
           <Text style={styles.title}>🚑 Responder Dashboard</Text>
           <Text style={styles.subtitle}>Emergency Response Management</Text>
         </View>
-        <TouchableOpacity 
-          style={styles.menuBtn} 
-          onPress={() => setMenuOpen(v => !v)}
-          activeOpacity={0.8}
-        >
-          <Animated.View
-            style={{
-              transform: [
-                {
-                  rotate: menuAnimation.interpolate({
-                    inputRange: [0, 1],
-                    outputRange: ['0deg', '180deg'],
-                  }),
-                },
-              ],
-            }}
-          >
-            <Text style={styles.menuBtnText}>☰</Text>
-          </Animated.View>
-        </TouchableOpacity>
+        <View style={styles.headerActions}>
+          <View style={{ position: 'relative' }}>
+            <TouchableOpacity
+              style={styles.bellBtn}
+              onPress={() => { setNotifOpen(o => !o); if (!notifOpen) { unseenRef.current = 0; setUnseen(0); } }}
+              activeOpacity={0.8}
+            >
+              <Text style={styles.bellIcon}>🔔</Text>
+              {unseen > 0 && (
+                <View style={styles.badge}><Text style={styles.badgeText}>{unseen}</Text></View>
+              )}
+            </TouchableOpacity>
+            {notifOpen && (
+              <View style={styles.dropdown}>
+                {notifs.length === 0 ? (
+                  <Text style={styles.emptyText}>No notifications yet</Text>
+                ) : (
+                  notifs.map(n => (
+                    <View key={n.id} style={styles.notifItem}>
+                      <Text style={[styles.notifDot, { color: n.kind === 'new' ? '#ffd166' : '#66d9ef' }]}>•</Text>
+                      <View style={{ flex: 1 }}>
+                        <Text style={styles.notifTitle}>{n.title}</Text>
+                        <Text style={styles.notifTime}>{new Date(n.time).toLocaleTimeString()}</Text>
+                      </View>
+                    </View>
+                  ))
+                )}
+              </View>
+            )}
+          </View>
+          <TouchableOpacity style={styles.menuBtn} onPress={() => setMenuOpen(v => !v)} activeOpacity={0.8}>
+            <Animated.View
+              style={{
+                transform: [
+                  {
+                    rotate: menuAnimation.interpolate({ inputRange: [0,1], outputRange: ['0deg','180deg'] }),
+                  },
+                ],
+              }}
+            >
+              <Text style={styles.menuBtnText}>☰</Text>
+            </Animated.View>
+          </TouchableOpacity>
+        </View>
       </Animated.View>
 
       {/* Menu Overlay */}
@@ -354,12 +448,24 @@ export default function ResponderDashboard({ navigation }: ResponderDashProps) {
               <Text style={styles.menuItemText}>⚙️ Settings</Text>
             </TouchableOpacity>
             <TouchableOpacity 
+              style={styles.menuItem}
+              onPress={async () => {
+                const next = !soundEnabled;
+                setSoundEnabledState(next);
+                await setSoundEnabled(next);
+              }}
+              activeOpacity={0.7}
+            >
+              <Text style={styles.menuItemText}>{soundEnabled ? '🔔 Sound: On' : '🔕 Sound: Off'}</Text>
+            </TouchableOpacity>
+            <TouchableOpacity 
               style={styles.menuItem} 
               onPress={() => { setMenuOpen(false); Alert.alert('About & Services', 'Coming soon'); }}
               activeOpacity={0.7}
             >
               <Text style={styles.menuItemText}>ℹ️ About & Services</Text>
             </TouchableOpacity>
+
             <View style={styles.menuDivider} />
             <TouchableOpacity 
               style={[styles.menuItem, { backgroundColor: '#d90429' }]} 
@@ -562,6 +668,80 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: '#a0a0a0',
     marginTop: 4,
+  },
+  headerActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  bellBtn: {
+    backgroundColor: '#2b2d42',
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    borderRadius: 8,
+  },
+  bellIcon: {
+    color: '#fff',
+    fontSize: 18,
+    fontWeight: '800',
+  },
+  badge: {
+    position: 'absolute',
+    top: -6,
+    right: -6,
+    backgroundColor: '#d90429',
+    minWidth: 18,
+    height: 18,
+    borderRadius: 9,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 4,
+    borderWidth: 1,
+    borderColor: '#111629',
+  },
+  badgeText: {
+    color: '#fff',
+    fontSize: 10,
+    fontWeight: '800',
+  },
+  dropdown: {
+    position: 'absolute',
+    right: 0,
+    top: 44,
+    backgroundColor: '#0f0f23',
+    borderWidth: 1,
+    borderColor: '#333',
+    borderRadius: 10,
+    width: Math.min(width * 0.8, 280),
+    maxHeight: 260,
+    paddingVertical: 8,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.3,
+    shadowRadius: 10,
+    elevation: 30,
+    zIndex: 2000,
+  },
+  notifItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: '#1f1f35',
+  },
+  notifDot: {
+    fontSize: 18,
+    marginRight: 2,
+  },
+  notifTitle: {
+    color: '#fff',
+    fontWeight: '700',
+  },
+  notifTime: {
+    color: '#999',
+    fontSize: 11,
   },
   menuBtn: { 
     backgroundColor: '#2b2d42', 

@@ -17,6 +17,35 @@ app.use(cors({ origin: '*', methods: ['GET', 'POST', 'PATCH', 'DELETE'], allowed
 app.use(express.json({ limit: '1mb' }));
 app.use(morgan('dev'));
 
+// --- SSE (Server-Sent Events) setup ---
+const sseClients = new Set();
+
+function sseBroadcast(event) {
+  const payload = `data: ${JSON.stringify(event)}\n\n`;
+  for (const res of sseClients) {
+    try { res.write(payload); } catch {}
+  }
+}
+
+app.get('/events', (req, res) => {
+  res.setHeader('Content-Type', 'text/event-stream');
+  res.setHeader('Cache-Control', 'no-cache, no-transform');
+  res.setHeader('Connection', 'keep-alive');
+  res.flushHeaders?.();
+  // Send a comment to establish the stream
+  res.write(': connected\n\n');
+  sseClients.add(res);
+  // Heartbeat to keep proxies from closing the connection
+  const hb = setInterval(() => {
+    try { res.write(`: hb ${Date.now()}\n\n`); } catch {}
+  }, 25000);
+  req.on('close', () => {
+    clearInterval(hb);
+    sseClients.delete(res);
+  });
+});
+// --- End SSE setup ---
+
 // Cloudinary config
 cloudinary.config({
   cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
@@ -184,6 +213,8 @@ app.post('/reports', async (req, res) => {
     const created = await Report.create({ ...input, status: 'Pending' });
     const report = withId(created.toObject());
     res.status(201).json({ report });
+    // Broadcast SSE event for new report
+    sseBroadcast({ type: 'report:new', report });
   } catch (err) {
     console.error('Create report error', err);
     res.status(500).json({ error: 'Internal server error' });
@@ -235,6 +266,8 @@ app.patch('/reports/:id/status', async (req, res) => {
     if (!updatedDoc) return res.status(404).json({ error: 'Report not found' });
     const report = withId(updatedDoc.toObject());
     res.json({ report });
+    // Broadcast SSE event for report status update
+    sseBroadcast({ type: 'report:update', report });
   } catch (err) {
     console.error('Update report status error', err);
     res.status(500).json({ error: 'Internal server error' });

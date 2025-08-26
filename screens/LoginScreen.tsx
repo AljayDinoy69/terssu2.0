@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { View, Text, TextInput, StyleSheet, TouchableOpacity, Alert, Animated, Dimensions } from 'react-native';
+import { View, Text, TextInput, StyleSheet, TouchableOpacity, Alert, Animated, Dimensions, Image, ImageBackground } from 'react-native';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { RootStackParamList } from '../navigation/AppNavigator';
 import { login } from '../utils/auth';
@@ -74,6 +74,18 @@ export default function LoginScreen({ navigation }: LoginProps) {
     ]).start();
   }, []);
 
+  // Ensure back always goes to Home
+  useEffect(() => {
+    const unsub = navigation.addListener('beforeRemove', (e) => {
+      const action: any = (e as any).data?.action;
+      if (action?.type === 'GO_BACK') {
+        e.preventDefault();
+        navigation.reset({ index: 0, routes: [{ name: 'Home' }] });
+      }
+    });
+    return unsub;
+  }, [navigation]);
+
   const onLogin = async () => {
     // Button press animation
     Animated.sequence([
@@ -104,11 +116,17 @@ export default function LoginScreen({ navigation }: LoginProps) {
 
 
   return (
-    <View style={styles.container}>
-      <View style={styles.backgroundPattern} />
+    <ImageBackground
+      source={require('../assets/back-wall.jpg')}
+      style={styles.bg}
+      resizeMode="cover"
+    >
+      <View style={styles.container}>
+        <View style={styles.backgroundPattern} />
       
       {/* Animated Title */}
       <Animated.View style={[styles.titleContainer, { transform: [{ scale: titleScale }] }]}>
+        <Image source={require('../assets/icon.png')} style={styles.logo} />
         <Text style={styles.title}>Welcome Back</Text>
         <Text style={styles.subtitle}>Sign in to continue</Text>
       </Animated.View>
@@ -165,23 +183,17 @@ export default function LoginScreen({ navigation }: LoginProps) {
 
       {/* Animated Links */}
       <Animated.View style={[styles.linksContainer, { transform: [{ scale: linkScale }] }]}>
-        <TouchableOpacity
-          style={styles.linkBtn}
-          onPress={() => navigation.navigate('Report', { anonymous: true })}
-          activeOpacity={0.7}
-        >
-          <Text style={styles.linkText}>🚨 Report as Anonymous</Text>
-        </TouchableOpacity>
 
         <TouchableOpacity
           style={styles.linkBtn}
           onPress={() => navigation.navigate('Signup')}
           activeOpacity={0.7}
         >
-          <Text style={styles.linkText}>✨ Signup (Regular Users)</Text>
+          <Text style={styles.linkText}>👤 Dont have an account? Signup</Text>
         </TouchableOpacity>
       </Animated.View>
     </View>
+    </ImageBackground>
   );
 }
 
@@ -189,8 +201,11 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     padding: 24,
-    backgroundColor: '#0f0f23',
+    backgroundColor: 'transparent',
     justifyContent: 'center',
+  },
+  bg: {
+    flex: 1,
   },
   backgroundPattern: {
     position: 'absolute',
@@ -204,6 +219,11 @@ const styles = StyleSheet.create({
   titleContainer: {
     alignItems: 'center',
     marginBottom: 32,
+  },
+  logo: {
+    width: 100,
+    height: 100,
+    marginBottom: 16,
   },
   title: {
     fontSize: 32,

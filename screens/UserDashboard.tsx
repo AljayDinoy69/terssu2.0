@@ -3,6 +3,8 @@ import { View, Text, StyleSheet, FlatList, TouchableOpacity, RefreshControl, Tex
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { RootStackParamList } from '../navigation/AppNavigator';
 import { getCurrentUser, listReportsByUser, logout, Report } from '../utils/auth';
+import { playNotificationSound } from '../utils/sound';
+import { isSoundEnabled, setSoundEnabled } from '../utils/settings';
 
 export type UserDashProps = NativeStackScreenProps<RootStackParamList, 'UserDashboard'>;
 
@@ -14,7 +16,10 @@ export default function UserDashboard({ navigation }: UserDashProps) {
   const [query, setQuery] = useState('');
   const [sort, setSort] = useState<'newest' | 'oldest'>('newest');
   const [menuOpen, setMenuOpen] = useState(false);
-  
+  const [soundEnabled, setSoundEnabledState] = useState<boolean>(true);
+  const prevPendingRef = useRef<number>(0);
+  const didInitRef = useRef<boolean>(false);
+
   // Animation values
   const fadeAnim = useRef(new Animated.Value(0)).current;
   const slideAnim = useRef(new Animated.Value(30)).current;
@@ -25,6 +30,7 @@ export default function UserDashboard({ navigation }: UserDashProps) {
   const menuAnimation = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
+
     // Entrance animations
     Animated.sequence([
       // Header animation
@@ -62,8 +68,18 @@ export default function UserDashboard({ navigation }: UserDashProps) {
       ]),
     ]).start();
 
-    // Pulse animation for pending reports
+    // Pulse animation for pending reports + sound trigger when count increases
     const pendingReports = reports.filter(r => r.status?.toLowerCase() === 'pending');
+    const pendingCount = pendingReports.length;
+    if (!didInitRef.current) {
+      prevPendingRef.current = pendingCount;
+      didInitRef.current = true;
+    } else if (pendingCount > prevPendingRef.current) {
+      playNotificationSound();
+      prevPendingRef.current = pendingCount;
+    } else {
+      prevPendingRef.current = pendingCount;
+    }
     if (pendingReports.length > 0) {
       const pulse = Animated.loop(
         Animated.sequence([
@@ -97,7 +113,12 @@ export default function UserDashboard({ navigation }: UserDashProps) {
     const user = await getCurrentUser();
     if (!user) return navigation.replace('Login');
     const list = await listReportsByUser(user.id);
-    setReports([...list].sort((a, b) => (b?.createdAt || 0) - (a?.createdAt || 0)));
+    // Load sound preference
+    try {
+      const pref = await isSoundEnabled();
+      setSoundEnabledState(pref);
+    } catch {}
+    setReports([...list].sort((a, b) => Number(b?.createdAt ?? 0) - Number(a?.createdAt ?? 0)));
   };
 
   useEffect(() => {
@@ -121,8 +142,8 @@ export default function UserDashboard({ navigation }: UserDashProps) {
       );
     })
     .sort((a, b) => {
-      if (sort === 'newest') return (b?.createdAt || 0) - (a?.createdAt || 0);
-      return (a?.createdAt || 0) - (b?.createdAt || 0);
+      if (sort === 'newest') return Number(b?.createdAt ?? 0) - Number(a?.createdAt ?? 0);
+      return Number(a?.createdAt ?? 0) - Number(b?.createdAt ?? 0);
     });
 
   const getStatsData = () => {
@@ -280,6 +301,17 @@ export default function UserDashboard({ navigation }: UserDashProps) {
               activeOpacity={0.7}
             >
               <Text style={styles.menuItemText}>⚙️ Settings</Text>
+            </TouchableOpacity>
+            <TouchableOpacity 
+              style={styles.menuItem}
+              onPress={async () => {
+                const next = !soundEnabled;
+                setSoundEnabledState(next);
+                await setSoundEnabled(next);
+              }}
+              activeOpacity={0.7}
+            >
+              <Text style={styles.menuItemText}>{soundEnabled ? '🔔 Sound: On' : '🔕 Sound: Off'}</Text>
             </TouchableOpacity>
             <TouchableOpacity 
               style={styles.menuItem} 

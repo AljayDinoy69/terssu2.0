@@ -27,7 +27,7 @@ export default function AppNavigator() {
   return (
     <NavigationContainer theme={DefaultTheme}>
       <Stack.Navigator initialRouteName="Home">
-        <Stack.Screen name="Home" component={HomeScreen} options={{ title: 'ERS - Emergency Response System' }} />
+        <Stack.Screen name="Home" component={HomeScreen} options={{ headerShown: false }} />
         <Stack.Screen name="Login" component={LoginScreen} />
         <Stack.Screen name="Signup" component={SignupScreen} />
         <Stack.Screen name="Report" component={ReportScreen} options={{ title: 'Report Incident' }} />
