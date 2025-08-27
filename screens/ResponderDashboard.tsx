@@ -1,6 +1,10 @@
 import React, { useEffect, useState, useRef } from 'react';
-import { View, Text, StyleSheet, FlatList, TouchableOpacity, Alert, Image, ScrollView, Animated, Dimensions, Modal } from 'react-native';
+import { View, Text, StyleSheet, FlatList, TouchableOpacity, Alert, Image, ScrollView, Animated, Dimensions, Modal, Platform } from 'react-native';
 import * as Location from 'expo-location';
+import { MapComponent } from './MapComponent';
+import { ReportCard } from './ReportCard';
+
+import Constants from 'expo-constants';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { RootStackParamList } from '../navigation/AppNavigator';
 import { getCurrentUser, listAssignedReports, logout, Report, updateReportStatus, ReportStatus, listUsers, listNotifications, markNotificationRead, deleteNotification, markAllNotificationsRead, Notification as NotificationItem } from '../utils/auth';
@@ -28,6 +32,7 @@ export default function ResponderDashboard({ navigation }: ResponderDashProps) {
   const [detailReport, setDetailReport] = useState<Report | null>(null);
   const [nameMap, setNameMap] = useState<Record<string, string>>({});
   const [soundEnabled, setSoundEnabledState] = useState<boolean>(true);
+  const mapRef = useRef<any>(null);
   const prevPendingRef = useRef<number>(0);
   const didInitRef = useRef<boolean>(false);
   const sseActiveRef = useRef<boolean>(false);
@@ -41,6 +46,10 @@ export default function ResponderDashboard({ navigation }: ResponderDashProps) {
   const [incidentCoord, setIncidentCoord] = useState<{ lat: number; lon: number } | null>(null);
   const [myCoord, setMyCoord] = useState<{ lat: number; lon: number } | null>(null);
   const [mapError, setMapError] = useState<string | null>(null);
+
+  // Use Google provider on Android and on iOS when not running inside Expo Go
+  const isExpoGo = (Constants as any)?.appOwnership === 'expo';
+  const useGoogleProvider = Platform.OS === 'android' || (Platform.OS === 'ios' && !isExpoGo);
 
   // Animation values
   const fadeAnim = useRef(new Animated.Value(0)).current;
@@ -313,72 +322,6 @@ export default function ResponderDashboard({ navigation }: ResponderDashProps) {
 
   const stats = getStatsData();
 
-  const ReportCard: React.FC<{ item: Report; index: number; }> = ({ item }) => {
-    return (
-      <View style={styles.card}>
-        <View style={styles.cardHeader}>
-          <Text style={styles.cardTitle}>{item.type}</Text>
-          <View style={[styles.statusBadge, { backgroundColor: getStatusColor(item.status) }]}>
-            <Text style={styles.statusText}>
-              {getStatusIcon(item.status)} {item.status?.toUpperCase() || 'UNKNOWN'}
-            </Text>
-          </View>
-        </View>
-
-        {!!item.chiefComplaint && (
-          <Text style={styles.cardDesc} numberOfLines={2} ellipsizeMode="tail">
-            🆘 Chief Complaint: {item.chiefComplaint}
-          </Text>
-        )}
-        {!!item.description && (
-          <Text style={styles.cardDesc} numberOfLines={3} ellipsizeMode="tail">
-            📝 {item.description}
-          </Text>
-        )}
-        {item.photoUri ? (
-          <Image source={{ uri: item.photoUri }} style={styles.thumbnail} resizeMode="cover" />
-        ) : null}
-
-        <View style={styles.reportDetails}>
-          {!!item.fullName && (
-            <Text style={styles.meta} numberOfLines={1} ellipsizeMode="tail">
-              🙋 Full Name: {item.fullName}
-            </Text>
-          )}
-          {!!item.contactNo && (
-            <Text style={styles.meta} numberOfLines={1} ellipsizeMode="tail">
-              📞 Contact: {item.contactNo}
-            </Text>
-          )}
-          {!!item.personsInvolved && (
-            <Text style={styles.meta} numberOfLines={1} ellipsizeMode="tail">
-              👥 Persons Involved: {item.personsInvolved}
-            </Text>
-          )}
-          <Text style={styles.meta} numberOfLines={1} ellipsizeMode="tail">
-            👨‍🚒 Responder: {nameMap[item.responderId] || item.responderId}
-          </Text>
-          <Text style={styles.meta} numberOfLines={1} ellipsizeMode="middle">
-            👤 From: {item.fullName || (item.userId ? (nameMap[item.userId] || 'Anonymous') : 'Anonymous')}
-          </Text>
-          <Text style={styles.meta}>
-            📅 Created: {new Date(item.createdAt).toLocaleString()}
-          </Text>
-        </View>
-
-        <View style={styles.cardActions}>
-          <TouchableOpacity
-            style={styles.viewBtn}
-            onPress={() => setDetailReport(item)}
-            activeOpacity={0.85}
-          >
-            <Text style={styles.viewBtnText}>👁️ View Details</Text>
-          </TouchableOpacity>
-        </View>
-      </View>
-    );
-  };
-
   // Determine list based on selected tab
   const activeList = activeTab === 'pending' ? pending : activeTab === 'active' ? active : completed;
 
@@ -433,7 +376,7 @@ export default function ResponderDashboard({ navigation }: ResponderDashProps) {
 
   return (
     <View style={styles.container}>
-      <View style={styles.backgroundPattern} />
+      <View style={styles.backgroundPattern} pointerEvents="none" />
       
       {/* Header */}
       <Animated.View style={[styles.header, { transform: [{ scale: headerScale }] }]}> 
@@ -685,7 +628,12 @@ export default function ResponderDashboard({ navigation }: ResponderDashProps) {
               data={activeList}
               keyExtractor={(item) => item.id}
               renderItem={({ item, index }) => (
-                <ReportCard item={item} index={index} />
+                <ReportCard 
+                  item={item} 
+                  index={index} 
+                  nameMap={nameMap}
+                  onPress={() => setDetailReport(item)}
+                />
               )}
               scrollEnabled={false}
               showsVerticalScrollIndicator={false}
@@ -729,8 +677,8 @@ export default function ResponderDashboard({ navigation }: ResponderDashProps) {
                 ) : null}
                 <View style={styles.modalRow}><Text style={styles.modalLabel}>From:</Text><Text style={styles.modalValue}>{detailReport.fullName || (detailReport.userId ? (nameMap[detailReport.userId] || 'Anonymous') : 'Anonymous')}</Text></View>
                 <View style={styles.modalRow}><Text style={styles.modalLabel}>Created:</Text><Text style={styles.modalValue}>{new Date(detailReport.createdAt).toLocaleString()}</Text></View>
-                {detailReport.photoUri ? (
-                  <Image source={{ uri: detailReport.photoUri }} style={styles.modalImage} resizeMode="cover" />
+                {(detailReport.photoUrl || detailReport.photoUri) ? (
+                  <Image source={{ uri: detailReport.photoUrl || detailReport.photoUri }} style={styles.modalImage} resizeMode="cover" />
                 ) : null}
               </ScrollView>
             )}
@@ -774,39 +722,15 @@ export default function ResponderDashboard({ navigation }: ResponderDashProps) {
               <Text style={styles.mapErrorText}>⚠️ {mapError}</Text>
             ) : null}
             <View style={styles.mapBox}>
-              {/* Simple schematic plotting both points relatively */}
-              {(() => {
-                if (!incidentCoord) return null;
-                const inc = incidentCoord;
-                const me = myCoord;
-                // Define a small bounding box using both points; fallback size
-                const lats = [inc.lat, me?.lat ?? inc.lat];
-                const lons = [inc.lon, me?.lon ?? inc.lon];
-                const minLat = Math.min(...lats);
-                const maxLat = Math.max(...lats);
-                const minLon = Math.min(...lons);
-                const maxLon = Math.max(...lons);
-                const pad = 0.0005; // tiny padding for visibility
-                const latSpan = Math.max(maxLat - minLat, 1e-6) + pad;
-                const lonSpan = Math.max(maxLon - minLon, 1e-6) + pad;
-                const W = 260, H = 180;
-                const toX = (lon: number) => ((lon - minLon) / lonSpan) * (W - 20) + 10;
-                const toY = (lat: number) => (H - 20) - ((lat - minLat) / latSpan) * (H - 20) + 10;
-                return (
-                  <>
-                    {/* Incident marker */}
-                    <View style={[styles.marker, { left: toX(inc.lon), top: toY(inc.lat), backgroundColor: '#d90429' }]} />
-                    <Text style={[styles.markerLabel, { left: toX(inc.lon) + 8, top: toY(inc.lat) - 6, color: '#d90429' }]}>Incident</Text>
-                    {/* My location marker */}
-                    {me && (
-                      <>
-                        <View style={[styles.marker, { left: toX(me.lon), top: toY(me.lat), backgroundColor: '#00aaff' }]} />
-                        <Text style={[styles.markerLabel, { left: toX(me.lon) + 8, top: toY(me.lat) - 6, color: '#00aaff' }]}>Me</Text>
-                      </>
-                    )}
-                  </>
-                );
-              })()}
+              {incidentCoord ? (
+                <MapComponent
+                  incidentCoord={incidentCoord}
+                  myCoord={myCoord}
+                  distanceKm={distanceKm}
+                />
+              ) : (
+                <Text style={styles.mapErrorText}>⚠️ Invalid incident location</Text>
+              )}
             </View>
             <View style={styles.mapLegend}>
               <Text style={styles.mapLegendText}>📍 Incident: {incidentCoord ? `${incidentCoord.lat.toFixed(5)}, ${incidentCoord.lon.toFixed(5)}` : 'N/A'}</Text>
@@ -1127,6 +1051,9 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     borderWidth: 1,
     borderColor: '#3b3f5a',
+    alignSelf: 'flex-start',
+    maxWidth: '100%',
+    flexShrink: 1,
   },
   viewBtnText: {
     color: '#ffd166',
@@ -1268,38 +1195,45 @@ const styles = StyleSheet.create({
   },
   modalTitle: {
     color: '#fff',
-    fontSize: 18,
+    fontSize: 16,
     fontWeight: '800',
     marginBottom: 12,
-  },
-  modalRow: {
-    flexDirection: 'row',
-    marginBottom: 8,
-    gap: 8,
-  },
-  modalLabel: {
-    color: '#a0a0a0',
-    fontWeight: '700',
-    minWidth: 110,
-  },
-  modalValue: {
-    color: '#fff',
-    flex: 1,
-    flexWrap: 'wrap',
-  },
-  modalImage: {
-    width: '100%',
-    height: 180,
+    paddingVertical: 8,
+    paddingHorizontal: 10,
     borderRadius: 8,
-    marginTop: 8,
     borderWidth: 1,
     borderColor: '#333',
     backgroundColor: '#111',
+  },
+  // Modal detail rows (stack label above value)
+  modalRow: {
+    marginBottom: 10,
+  },
+  modalLabel: {
+    color: '#a0a0a0',
+    fontSize: 12,
+    marginBottom: 2,
+    fontWeight: '700',
+  },
+  modalValue: {
+    color: '#fff',
+    fontSize: 14,
+    lineHeight: 20,
+  },
+  modalImage: {
+    width: '100%',
+    height: 220,
+    borderRadius: 10,
+    marginTop: 8,
+    backgroundColor: '#111',
+    borderWidth: 1,
+    borderColor: '#333',
   },
   modalActionsRow: {
     flexDirection: 'row',
     justifyContent: 'flex-end',
     gap: 10,
+    flexWrap: 'wrap',
     marginTop: 12,
   },
   cancelBtn: {
@@ -1307,6 +1241,9 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
     paddingHorizontal: 16,
     borderRadius: 8,
+    flexShrink: 1,
+    alignSelf: 'flex-start',
+    marginTop: 8,
   },
   cancelBtnText: {
     color: '#fff',
@@ -1317,6 +1254,9 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
     paddingHorizontal: 16,
     borderRadius: 8,
+    flexShrink: 1,
+    alignSelf: 'flex-start',
+    marginTop: 8,
   },
   deleteBtnText: {
     color: '#fff',

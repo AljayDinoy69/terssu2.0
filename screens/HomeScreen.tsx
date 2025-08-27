@@ -1,9 +1,13 @@
-import React, { useEffect, useRef } from 'react';
-import { View, Text, StyleSheet, Image, TouchableOpacity, Animated, ScrollView, ImageBackground } from 'react-native';
+import React, { useEffect, useRef, useState } from 'react';
+import { View, Text, StyleSheet, Image, TouchableOpacity, Animated, ScrollView, ImageBackground, Modal, FlatList, Platform } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { RootStackParamList } from '../navigation/AppNavigator';
-// import { Header } from 'react-native/Libraries/NewAppScreen';
+import api from '../utils/api';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { getCurrentUser, listNotifications, markNotificationRead } from '../utils/auth';
+import { playNotificationSound } from '../utils/sound';
+import { API_BASE_URL } from '../utils/api';
 
 export type HomeProps = NativeStackScreenProps<RootStackParamList, 'Home'>;
 
@@ -19,7 +23,122 @@ export default function HomeScreen({ navigation }: HomeProps) {
   const buttonScale2 = useRef(new Animated.Value(0.9)).current;
   const buttonScale3 = useRef(new Animated.Value(0.9)).current;
 
-  // Notifications removed from HomeScreen
+  // Notification state
+  const [isNotificationModalVisible, setIsNotificationModalVisible] = useState(false);
+  const [notifications, setNotifications] = useState<any[]>([]);
+  const [notificationCount, setNotificationCount] = useState(0);
+  const [expandedNotificationId, setExpandedNotificationId] = useState<string | null>(null);
+
+  // Track previous notification count for sound notification
+  const prevNotificationCountRef = useRef<number>(0);
+
+  // SSE subscription (with polling fallback) - for real-time notifications
+  const [sseActive, setSseActive] = useState<boolean>(false);
+  const userRef = useRef<any>(null);
+  const deviceIdRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    let es: any = null;
+    let pollTimer: any = null;
+
+    const start = async () => {
+      try {
+        const user = await getCurrentUser();
+        userRef.current = user;
+
+        let currentDeviceId: string | null = null;
+
+        if (!user) {
+          // For anonymous users, get device ID
+          currentDeviceId = await AsyncStorage.getItem('ERS_DEVICE_ID');
+          deviceIdRef.current = currentDeviceId;
+        }
+
+        console.log('SSE Setup - User:', user, 'DeviceId:', currentDeviceId); // Debug log
+
+        // Try SSE first, fallback to polling
+        if (typeof (global as any).EventSource !== 'undefined') {
+          es = new (global as any).EventSource(`${API_BASE_URL}/events`);
+          es.onopen = () => {
+            setSseActive(true);
+            console.log('SSE connection opened for HomeScreen'); // Debug log
+          };
+          es.onmessage = async (ev: MessageEvent) => {
+            try {
+              const evt = JSON.parse((ev as any).data);
+              if (!evt || !evt.type) return;
+
+              console.log('SSE Event received:', evt.type, evt); // Debug log
+
+              if (evt.type === 'report:update') {
+                const report = evt.report;
+                if (!report) return;
+
+                console.log('Report update event:', report.id, report.status); // Debug log
+
+                // Check if this update is relevant to current user
+                let isRelevant = false;
+
+                if (user && report.userId === user.id) {
+                  // For registered users
+                  isRelevant = true;
+                  console.log('Update relevant to registered user:', user.id); // Debug log
+                } else if (!user && report.deviceId === currentDeviceId) {
+                  // For anonymous users
+                  isRelevant = true;
+                  console.log('Update relevant to anonymous user with deviceId:', currentDeviceId); // Debug log
+                }
+
+                if (isRelevant) {
+                  console.log('Playing notification sound for report update'); // Debug log
+                  playNotificationSound();
+
+                  // Refresh notifications to show the update
+                  await fetchNotifications();
+                }
+              }
+            } catch (error) {
+              console.error('Error processing SSE event:', error);
+            }
+          };
+          es.onerror = () => {
+            setSseActive(false);
+            console.log('SSE connection error, falling back to polling'); // Debug log
+            try { es.close(); } catch {}
+            es = null;
+            // Fallback to polling every 10 seconds
+            pollTimer = setInterval(async () => {
+              console.log('Polling for notification updates'); // Debug log
+              await fetchNotifications();
+            }, 10000);
+          };
+        } else {
+          console.log('EventSource not available, using polling'); // Debug log
+          // Fallback to polling every 10 seconds
+          pollTimer = setInterval(async () => {
+            console.log('Polling for notification updates'); // Debug log
+            await fetchNotifications();
+          }, 10000);
+        }
+      } catch (error) {
+        console.error('Error setting up SSE:', error);
+        // Fallback to polling
+        pollTimer = setInterval(async () => {
+          await fetchNotifications();
+        }, 10000);
+      }
+    };
+
+    start();
+
+    return () => {
+      setSseActive(false);
+      if (es) {
+        try { es.close(); } catch {}
+      }
+      if (pollTimer) clearInterval(pollTimer);
+    };
+  }, []);
 
   useEffect(() => {
     // Entrance animations
@@ -94,6 +213,99 @@ export default function HomeScreen({ navigation }: HomeProps) {
 
     return () => pulseAnimation.stop();
   }, []);
+  const fetchNotifications = async () => {
+    try {
+      // Get current user to determine if anonymous or registered
+      const user = await getCurrentUser();
+      console.log('Current user:', user); // Debug log
+
+      let notifications: any[] = [];
+
+      if (user) {
+        // For registered users, fetch notifications by userId
+        console.log('Fetching notifications for registered user:', user.id); // Debug log
+        notifications = await listNotifications(user.id);
+      } else {
+        // For anonymous users, get device ID and fetch device-specific notifications
+        const deviceId = await AsyncStorage.getItem('ERS_DEVICE_ID');
+        console.log('Anonymous user - Device ID from storage:', deviceId); // Debug log
+
+        if (deviceId) {
+          console.log('Fetching notifications for anonymous user with deviceId:', deviceId); // Debug log
+          notifications = await listNotifications(undefined, deviceId);
+        } else {
+          console.log('No device ID found for anonymous user'); // Debug log
+        }
+      }
+
+      console.log('Fetched notifications:', notifications.length, 'notifications'); // Debug log
+      console.log('Notification titles:', notifications.map(n => n.title)); // Debug log
+
+      setNotifications(notifications);
+      const newCount = notifications.filter(n => !n.read).length;
+      setNotificationCount(newCount);
+
+      // Play sound if there are new notifications (count increased)
+      if (newCount > prevNotificationCountRef.current) {
+        playNotificationSound();
+      }
+
+      // Update the previous count for next comparison
+      prevNotificationCountRef.current = newCount;
+    } catch (error) {
+      console.error('Error fetching notifications:', error);
+      // Fallback to empty notifications if there's an error
+      setNotifications([]);
+      setNotificationCount(0);
+    }
+  };
+
+  const saveReadStatus = async (notificationId: string, read: boolean) => {
+    try {
+      const storedReadStatus = await AsyncStorage.getItem('notificationReadStatus');
+      const readStatus = storedReadStatus ? JSON.parse(storedReadStatus) : {};
+      readStatus[notificationId] = read;
+      await AsyncStorage.setItem('notificationReadStatus', JSON.stringify(readStatus));
+    } catch (error) {
+      console.error('Error saving read status:', error);
+    }
+  };
+
+  const markNotificationAsRead = async (notificationId: string) => {
+    try {
+      // Toggle expanded state
+      if (expandedNotificationId === notificationId) {
+        setExpandedNotificationId(null);
+      } else {
+        setExpandedNotificationId(notificationId);
+      }
+
+      // Mark as read on server
+      await markNotificationRead(notificationId, true);
+
+      // Update local state
+      setNotifications(prev =>
+        prev.map(notification =>
+          notification.id === notificationId
+            ? { ...notification, read: true }
+            : notification
+        )
+      );
+
+      // Update badge count
+      setNotificationCount(prev => Math.max(0, prev - 1));
+    } catch (error) {
+      console.error('Error marking notification as read:', error);
+    }
+  };
+
+  const toggleNotificationModal = () => {
+    setIsNotificationModalVisible(!isNotificationModalVisible);
+    if (!isNotificationModalVisible) {
+      console.log('Opening notification modal - fetching notifications'); // Debug log
+      fetchNotifications();
+    }
+  };
 
   // Notifications removed: no SSE on HomeScreen
 
@@ -124,6 +336,24 @@ export default function HomeScreen({ navigation }: HomeProps) {
       style={styles.bg}
       resizeMode="cover"
     >
+      {/* Notification Bell */}
+      <View style={styles.header}>
+        <TouchableOpacity
+          style={[styles.notificationBell, notificationCount > 0 && styles.notificationBellWithBadge]}
+          onPress={toggleNotificationModal}
+          activeOpacity={0.7}
+        >
+          <Text style={styles.bellIcon}>🔔</Text>
+          {notificationCount > 0 && (
+            <View style={styles.notificationBadge}>
+              <Text style={styles.badgeText}>
+                {notificationCount > 99 ? '99+' : notificationCount}
+              </Text>
+            </View>
+          )}
+        </TouchableOpacity>
+      </View>
+
       {/* Header: notification bell removed */}
       <ScrollView style={styles.scroll} contentContainerStyle={styles.container}>
         {/* Background gradient effect */}
@@ -132,6 +362,7 @@ export default function HomeScreen({ navigation }: HomeProps) {
           start={{ x: 0, y: 0 }}
           end={{ x: 1, y: 1 }}
           style={styles.backgroundGradient}
+          pointerEvents="none"
         />
 
         {/* Animated title */}
@@ -186,7 +417,7 @@ export default function HomeScreen({ navigation }: HomeProps) {
             >
               <View style={styles.buttonContent}>
                 <Text style={styles.btnText}>👤 Login</Text>
-                <View style={styles.buttonHighlight} />
+                <View style={styles.buttonHighlight} pointerEvents="none" />
               </View>
             </TouchableOpacity>
           </Animated.View>
@@ -199,7 +430,7 @@ export default function HomeScreen({ navigation }: HomeProps) {
             >
               <View style={styles.buttonContent}>
                 <Text style={styles.btnText}>✨ Signup</Text>
-                <View style={styles.buttonHighlight} />
+                <View style={styles.buttonHighlight} pointerEvents="none" />
               </View>
             </TouchableOpacity>
           </Animated.View>
@@ -231,6 +462,89 @@ export default function HomeScreen({ navigation }: HomeProps) {
           </View>
         </View>
       </ScrollView>
+
+      {/* Notification Modal */}
+      <Modal
+        visible={isNotificationModalVisible}
+        transparent={true}
+        animationType="fade"
+        onRequestClose={toggleNotificationModal}
+        supportedOrientations={['portrait', 'portrait-upside-down', 'landscape', 'landscape-left', 'landscape-right']}
+      >
+        <View style={styles.modalOverlay}>
+          <TouchableOpacity
+            style={styles.modalBackdrop}
+            activeOpacity={1}
+            onPress={toggleNotificationModal}
+          >
+            <View style={styles.modalContentWrapper}>
+              <View style={styles.notificationModal}>
+                <View style={styles.modalHeader}>
+                  <Text style={styles.modalTitle}>Notifications</Text>
+                  <TouchableOpacity
+                    onPress={toggleNotificationModal}
+                    style={styles.closeButton}
+                  >
+                    <Text style={styles.closeButtonText}>✕</Text>
+                  </TouchableOpacity>
+                </View>
+
+                {notifications.length > 0 ? (
+                  <FlatList
+                    data={notifications}
+                    keyExtractor={(item) => item.id}
+                    renderItem={({ item }) => {
+                      const isExpanded = expandedNotificationId === item.id;
+                      return (
+                        <View>
+                          <TouchableOpacity
+                            style={[styles.notificationItem, item.read && styles.readNotification]}
+                            onPress={() => markNotificationAsRead(item.id)}
+                          >
+                            <View style={styles.notificationContent}>
+                              <Text style={styles.notificationTitle}>{item.title}</Text>
+                              <Text style={styles.notificationMessage}>{item.title}</Text>
+                              <Text style={styles.notificationTimestamp}>
+                                {new Date(item.createdAt || item.timestamp).toLocaleDateString()} at{' '}
+                                {new Date(item.createdAt || item.timestamp).toLocaleTimeString()}
+                              </Text>
+                            </View>
+                            <View style={styles.notificationActions}>
+                              {!item.read && <View style={styles.unreadIndicator} />}
+                              <Text style={styles.expandIcon}>{isExpanded ? '▲' : '▼'}</Text>
+                            </View>
+                          </TouchableOpacity>
+
+                          {isExpanded && (
+                            <View style={styles.expandedNotification}>
+                              <Text style={styles.expandedDetails}>
+                                {item.reportId ? `Report ID: ${item.reportId}` : 'System notification'}
+                              </Text>
+                              <View style={styles.expandedFooter}>
+                                <Text style={styles.expandedTimestamp}>
+                                  Received: {new Date(item.createdAt || item.timestamp).toLocaleString()}
+                                </Text>
+                                <Text style={styles.readStatus}>
+                                  Status: {item.read ? 'Read' : 'Unread'}
+                                </Text>
+                              </View>
+                            </View>
+                          )}
+                        </View>
+                      );
+                    }}
+                    showsVerticalScrollIndicator={false}
+                  />
+                ) : (
+                  <View style={styles.noNotifications}>
+                    <Text style={styles.noNotificationsText}>No notifications yet</Text>
+                  </View>
+                )}
+              </View>
+            </View>
+          </TouchableOpacity>
+        </View>
+      </Modal>
     </ImageBackground>
   );
 }
@@ -245,6 +559,207 @@ const styles = StyleSheet.create({
   },
   bg: {
     flex: 1,
+  },
+  header: {
+    position: 'absolute',
+    top: 50,
+    right: 20,
+    zIndex: 10,
+  },
+  notificationBell: {
+    width: 50,
+    height: 50,
+    borderRadius: 25,
+    backgroundColor: 'rgba(255, 255, 255, 0.2)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.3)',
+  },
+  notificationBellWithBadge: {
+    // Add slight glow effect when there are notifications
+    shadowColor: '#d90429',
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 0.5,
+    shadowRadius: 10,
+    elevation: 10,
+  },
+  bellIcon: {
+    fontSize: 24,
+    color: '#fff',
+  },
+  notificationBadge: {
+    position: 'absolute',
+    top: -5,
+    right: -5,
+    backgroundColor: '#d90429',
+    borderRadius: 10,
+    minWidth: 20,
+    height: 20,
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderWidth: 2,
+    borderColor: '#fff',
+  },
+  badgeText: {
+    color: '#fff',
+    fontSize: 10,
+    fontWeight: 'bold',
+  },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+  },
+  modalBackdrop: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    width: '100%',
+    height: '100%',
+  },
+  modalContentWrapper: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    width: '100%',
+    height: '100%',
+    paddingHorizontal: 20,
+  },
+  notificationModal: {
+    backgroundColor: '#fff',
+    borderRadius: 20,
+    padding: 0,
+    width: '90%',
+    maxWidth: 400,
+    maxHeight: '70%',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 10 },
+    shadowOpacity: 0.25,
+    shadowRadius: 20,
+    elevation: 10,
+    // Ensure modal is always centered
+    alignSelf: 'center',
+    marginHorizontal: 'auto',
+  },
+  modalHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    padding: 20,
+    borderBottomWidth: 1,
+    borderBottomColor: '#e0e0e0',
+  },
+  modalTitle: {
+    fontSize: 20,
+    fontWeight: 'bold',
+    color: '#333',
+  },
+  closeButton: {
+    width: 30,
+    height: 30,
+    borderRadius: 15,
+    backgroundColor: '#f0f0f0',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  closeButtonText: {
+    fontSize: 16,
+    color: '#666',
+    fontWeight: 'bold',
+  },
+  notificationItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: 15,
+    borderBottomWidth: 1,
+    borderBottomColor: '#f0f0f0',
+    backgroundColor: '#fff',
+  },
+  readNotification: {
+    backgroundColor: '#f9f9f9',
+  },
+  notificationContent: {
+    flex: 1,
+    marginRight: 10,
+  },
+  notificationTitle: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    color: '#333',
+    marginBottom: 5,
+  },
+  notificationMessage: {
+    fontSize: 14,
+    color: '#666',
+    marginBottom: 5,
+    lineHeight: 18,
+  },
+  notificationTimestamp: {
+    fontSize: 12,
+    color: '#999',
+  },
+  unreadIndicator: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: '#d90429',
+  },
+  notificationActions: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginLeft: 10,
+  },
+  expandIcon: {
+    fontSize: 12,
+    color: '#666',
+    marginTop: 5,
+  },
+  expandedNotification: {
+    backgroundColor: '#f8f9fa',
+    borderTopWidth: 1,
+    borderTopColor: '#e9ecef',
+    padding: 15,
+  },
+  expandedDetails: {
+    fontSize: 14,
+    color: '#555',
+    lineHeight: 20,
+    marginBottom: 15,
+  },
+  expandedFooter: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingTop: 10,
+    borderTopWidth: 1,
+    borderTopColor: '#e9ecef',
+  },
+  expandedTimestamp: {
+    fontSize: 12,
+    color: '#888',
+    flex: 1,
+  },
+  readStatus: {
+    fontSize: 12,
+    fontWeight: 'bold',
+    color: '#28a745',
+  },
+  noNotifications: {
+    padding: 40,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  noNotificationsText: {
+    fontSize: 16,
+    color: '#666',
+    textAlign: 'center',
   },
   /* notification styles removed */
   scroll: {

@@ -23,6 +23,7 @@ export type Report = {
   photoUrl?: string;
   userId?: string; // undefined when anonymous
   responderId: string;
+  deviceId?: string; // Device identifier for anonymous reports
   status: ReportStatus;
   createdAt: number | string;
   // Additional optional metadata
@@ -160,8 +161,12 @@ export async function listAllReports() {
 }
 
 // Notifications
-export async function listNotifications(userId: string) {
-  const { notifications } = await api.get<{ notifications: Notification[] }>(`/notifications?userId=${encodeURIComponent(userId)}`);
+export async function listNotifications(userId?: string, deviceId?: string) {
+  if (!userId && !deviceId) throw new Error('Either userId or deviceId must be provided');
+  const params = new URLSearchParams();
+  if (userId) params.append('userId', userId);
+  if (deviceId) params.append('deviceId', deviceId);
+  const { notifications } = await api.get<{ notifications: Notification[] }>(`/notifications?${params.toString()}`);
   return notifications;
 }
 
@@ -174,7 +179,11 @@ export async function deleteNotification(id: string) {
   await api.delete<void>(`/notifications/${id}`);
 }
 
-export async function markAllNotificationsRead(userId: string) {
-  const res = await api.post<{ ok: boolean }>(`/notifications/mark-all-read`, { userId });
+export async function markAllNotificationsRead(userId?: string, deviceId?: string) {
+  if (!userId && !deviceId) throw new Error('Either userId or deviceId must be provided');
+  const body: any = {};
+  if (userId) body.userId = userId;
+  if (deviceId) body.deviceId = deviceId;
+  const res = await api.post<{ ok: boolean }>('/notifications/mark-all-read', body);
   return res.ok;
 }

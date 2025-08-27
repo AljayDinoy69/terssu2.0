@@ -6,6 +6,7 @@ import * as Location from 'expo-location';
 import * as ImagePicker from 'expo-image-picker';
 import { createReport, getCurrentUser, listResponders } from '../utils/auth';
 import { uploadImage } from '../utils/api';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
 export type ReportProps = NativeStackScreenProps<RootStackParamList, 'Report'>;
 
@@ -208,6 +209,24 @@ export default function ReportScreen({ navigation, route }: ReportProps) {
       setLoading(true);
       const user = await getCurrentUser();
       const userId = isAnonymous ? undefined : user?.id;
+      
+      // Generate or retrieve device ID for anonymous reports
+      let deviceId: string | undefined;
+      if (isAnonymous) {
+        const storedDeviceId = await AsyncStorage.getItem('ERS_DEVICE_ID');
+        console.log('ReportScreen - Anonymous user, stored deviceId:', storedDeviceId); // Debug log
+        
+        if (storedDeviceId) {
+          deviceId = storedDeviceId;
+          console.log('ReportScreen - Using existing deviceId:', deviceId); // Debug log
+        } else {
+          // Generate a unique device identifier
+          deviceId = `device_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+          await AsyncStorage.setItem('ERS_DEVICE_ID', deviceId);
+          console.log('ReportScreen - Generated new deviceId:', deviceId); // Debug log
+        }
+      }
+      
       let photoUrl: string | undefined;
       if (photoUri) {
         try {
@@ -229,6 +248,7 @@ export default function ReportScreen({ navigation, route }: ReportProps) {
             photoUrl, // preferred; server also maps legacy photoUri
             responderId: rid,
             userId,
+            deviceId, // Include device ID for anonymous reports
             fullName: fullName || undefined,
             contactNo,
             chiefComplaint,
@@ -236,6 +256,11 @@ export default function ReportScreen({ navigation, route }: ReportProps) {
           })
         )
       );
+      
+      console.log('ReportScreen - Report submitted successfully'); // Debug log
+      console.log('ReportScreen - deviceId used:', deviceId); // Debug log
+      console.log('ReportScreen - isAnonymous:', isAnonymous); // Debug log
+      console.log('ReportScreen - userId:', userId); // Debug log
       Alert.alert('Submitted', 'Your report has been sent to selected responders');
       if (userId) navigation.reset({ index: 0, routes: [{ name: 'UserDashboard' }] });
       else navigation.reset({ index: 0, routes: [{ name: 'Home' }] });

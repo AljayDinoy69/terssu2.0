@@ -8,6 +8,8 @@ import multer from 'multer';
 import Account from './models/Account.js';
 import Report from './models/Report.js';
 import Notification from './models/Notification.js';
+import AnonymousReport from './models/AnonymousReport.js';
+import AnonymousNotification from './models/AnonymousNotification.js';
 
 dotenv.config();
 
@@ -211,11 +213,34 @@ app.post('/reports', async (req, res) => {
     for (const key of required) if (!input[key]) return res.status(400).json({ error: `Missing field: ${key}` });
     // Allow clients that still send photoUri
     if (!input.photoUrl && input.photoUri) input.photoUrl = input.photoUri;
-    const created = await Report.create({ ...input, status: 'Pending' });
-    const report = withId(created.toObject());
+
+    let created;
+    let report;
+    let isAnonymousReport = !input.userId && input.deviceId;
+
+    if (isAnonymousReport) {
+      // Use AnonymousReport model for anonymous reports
+      console.log('Creating anonymous report for deviceId:', input.deviceId);
+      created = await AnonymousReport.create({
+        ...input,
+        status: 'Pending',
+        isAnonymous: true
+      });
+      report = created.toClient();
+      console.log('Anonymous report created with ID:', report.id);
+    } else {
+      // Use regular Report model for registered users
+      console.log('Creating regular report for userId:', input.userId);
+      created = await Report.create({ ...input, status: 'Pending' });
+      report = withId(created.toObject());
+      console.log('Regular report created with ID:', report.id);
+    }
+
     res.status(201).json({ report });
+
     // Broadcast SSE event for new report
     sseBroadcast({ type: 'report:new', report });
+
     // Create a Notification for the assigned responder
     try {
       if (report.responderId) {
@@ -226,7 +251,7 @@ app.post('/reports', async (req, res) => {
           kind: 'new',
           read: false,
         });
-        // Optional: could broadcast a notification event in future
+        console.log('Created responder notification for report:', report.id, 'responder:', report.responderId);
       }
     } catch (e) { console.error('Create notification error', e); }
   } catch (err) {
@@ -237,9 +262,17 @@ app.post('/reports', async (req, res) => {
 
 app.get('/reports', async (_req, res) => {
   try {
-    const reportsRaw = await Report.find({}).sort({ createdAt: -1 }).lean();
-    const reports = reportsRaw.map(withId);
-    res.json({ reports });
+    // Get both regular and anonymous reports
+    const [regularReports, anonymousReports] = await Promise.all([
+      Report.find({}).sort({ createdAt: -1 }).lean(),
+      AnonymousReport.find({}).sort({ createdAt: -1 }).lean()
+    ]);
+
+    const regularReportsMapped = regularReports.map(withId);
+    const anonymousReportsMapped = anonymousReports.map(r => r.toClient());
+
+    const allReports = [...regularReportsMapped, ...anonymousReportsMapped];
+    res.json({ reports: allReports });
   } catch (err) {
     console.error('List reports error', err);
     res.status(500).json({ error: 'Internal server error' });
@@ -258,12 +291,45 @@ app.get('/reports/user/:userId', async (req, res) => {
   }
 });
 
+// Anonymous Reports API
+app.get('/anonymous-reports', async (_req, res) => {
+  try {
+    const reportsRaw = await AnonymousReport.find({}).sort({ createdAt: -1 }).lean();
+    const reports = reportsRaw.map(r => r.toClient());
+    res.json({ reports });
+  } catch (err) {
+    console.error('List anonymous reports error', err);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+app.get('/anonymous-reports/device/:deviceId', async (req, res) => {
+  try {
+    const { deviceId } = req.params;
+    const reportsRaw = await AnonymousReport.find({ deviceId }).sort({ createdAt: -1 }).lean();
+    const reports = reportsRaw.map(r => r.toClient());
+    res.json({ reports });
+  } catch (err) {
+    console.error('List anonymous device reports error', err);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
 app.get('/reports/responder/:responderId', async (req, res) => {
   try {
     const { responderId } = req.params;
-    const reportsRaw = await Report.find({ responderId }).sort({ createdAt: -1 }).lean();
-    const reports = reportsRaw.map(withId);
-    res.json({ reports });
+
+    // Get both regular and anonymous reports for this responder
+    const [regularReports, anonymousReports] = await Promise.all([
+      Report.find({ responderId }).sort({ createdAt: -1 }).lean(),
+      AnonymousReport.find({ responderId }).sort({ createdAt: -1 }).lean()
+    ]);
+
+    const regularReportsMapped = regularReports.map(withId);
+    const anonymousReportsMapped = anonymousReports.map(r => r.toClient());
+
+    const allReports = [...regularReportsMapped, ...anonymousReportsMapped];
+    res.json({ reports: allReports });
   } catch (err) {
     console.error('List responder reports error', err);
     res.status(500).json({ error: 'Internal server error' });
@@ -276,28 +342,67 @@ app.patch('/reports/:id/status', async (req, res) => {
     const { status } = req.body || {};
     const allowed = ['Pending', 'In-progress', 'Resolved'];
     if (!allowed.includes(status)) return res.status(400).json({ error: 'Invalid status' });
-    const updatedDoc = await Report.findByIdAndUpdate(id, { status }, { new: true });
-    if (!updatedDoc) return res.status(404).json({ error: 'Report not found' });
-    const report = withId(updatedDoc.toObject());
+
+    // Try to find in AnonymousReport first, then regular Report
+    let updatedDoc = await AnonymousReport.findByIdAndUpdate(id, { status }, { new: true });
+    let report;
+    let isAnonymous = false;
+
+    if (updatedDoc) {
+      // Found in AnonymousReport
+      report = updatedDoc.toClient();
+      isAnonymous = true;
+      console.log('Updated anonymous report status:', id, 'to', status);
+    } else {
+      // Try regular Report
+      updatedDoc = await Report.findByIdAndUpdate(id, { status }, { new: true });
+      if (!updatedDoc) return res.status(404).json({ error: 'Report not found' });
+      report = withId(updatedDoc.toObject());
+      console.log('Updated regular report status:', id, 'to', status);
+    }
+
     res.json({ report });
+
     // Broadcast SSE event for report status update
     sseBroadcast({ type: 'report:update', report });
+
     // Do NOT notify the responder on status updates; only notify the reporting user below
     // Also notify the reporting user when their case status changes
     try {
-      if (report.userId) {
-        let title = 'Your report was updated';
-        if (report.status === 'In-progress') title = 'Your report is now in progress (taken)';
-        if (report.status === 'Resolved') title = 'Your report has been completed';
-        await Notification.create({
-          userId: String(report.userId),
-          title,
-          reportId: String(report.id),
-          kind: 'update',
-          read: false,
-        });
+      if (isAnonymous) {
+        // For anonymous reports, create AnonymousNotification
+        if (report.deviceId) {
+          let title = 'Your report was updated';
+          if (report.status === 'In-progress') title = 'Your report is now in progress (taken)';
+          if (report.status === 'Resolved') title = 'Your report has been completed';
+
+          await AnonymousNotification.create({
+            deviceId: String(report.deviceId),
+            title,
+            reportId: String(report.id),
+            kind: 'update',
+            read: false,
+          });
+          console.log('Created anonymous notification for report:', report.id, 'deviceId:', report.deviceId, 'status:', report.status);
+        }
+      } else {
+        // For registered users, create regular notification
+        if (report.userId) {
+          let title = 'Your report was updated';
+          if (report.status === 'In-progress') title = 'Your report is now in progress (taken)';
+          if (report.status === 'Resolved') title = 'Your report has been completed';
+
+          await Notification.create({
+            userId: String(report.userId),
+            title,
+            reportId: String(report.id),
+            kind: 'update',
+            read: false,
+          });
+          console.log('Created user notification for report:', report.id, 'user:', report.userId, 'status:', report.status);
+        }
       }
-    } catch (e) { console.error('Create user notification error', e); }
+    } catch (e) { console.error('Create notification error', e); }
   } catch (err) {
     console.error('Update report status error', err);
     res.status(500).json({ error: 'Internal server error' });
@@ -308,9 +413,29 @@ app.patch('/reports/:id/status', async (req, res) => {
 app.get('/notifications', async (req, res) => {
   try {
     const userId = String(req.query.userId || '').trim();
-    if (!userId) return res.status(400).json({ error: 'userId is required' });
-    const docs = await Notification.find({ userId }).sort({ createdAt: -1 }).lean();
-    const notifications = docs.map(d => ({ ...d, id: String(d._id), _id: undefined }));
+    const deviceId = String(req.query.deviceId || '').trim();
+
+    console.log('Notification request - userId:', userId, 'deviceId:', deviceId);
+
+    if (!userId && !deviceId) return res.status(400).json({ error: 'userId or deviceId is required' });
+
+    let notifications = [];
+
+    if (userId) {
+      // Fetch regular notifications for registered users
+      console.log('Fetching regular notifications for userId:', userId);
+      const docs = await Notification.find({ userId }).sort({ createdAt: -1 }).lean();
+      notifications = docs.map(d => ({ ...d, id: String(d._id), _id: undefined }));
+    } else if (deviceId) {
+      // Fetch anonymous notifications for anonymous users
+      console.log('Fetching anonymous notifications for deviceId:', deviceId);
+      const docs = await AnonymousNotification.find({ deviceId }).sort({ createdAt: -1 }).lean();
+      notifications = docs.map(d => d.toClient());
+    }
+
+    console.log('Found', notifications.length, 'notifications');
+    console.log('Notification titles:', notifications.map(n => ({ id: n.id, title: n.title, kind: n.kind })));
+
     res.json({ notifications });
   } catch (err) {
     console.error('List notifications error', err);
@@ -322,11 +447,25 @@ app.patch('/notifications/:id/read', async (req, res) => {
   try {
     const { id } = req.params;
     const { read } = req.body || {};
-    const updated = await Notification.findByIdAndUpdate(id, { read: !!read }, { new: true }).lean();
-    if (!updated) return res.status(404).json({ error: 'Notification not found' });
-    const notification = { ...updated, id: String(updated._id) };
-    delete notification._id;
-    res.json({ notification });
+
+    // Try to update in AnonymousNotification first, then regular Notification
+    let updated = await AnonymousNotification.findByIdAndUpdate(id, { read: !!read }, { new: true });
+
+    if (updated) {
+      // Found in AnonymousNotification
+      const notification = updated.toClient();
+      console.log('Marked anonymous notification as read:', id, read);
+      res.json({ notification });
+    } else {
+      // Try regular Notification
+      updated = await Notification.findByIdAndUpdate(id, { read: !!read }, { new: true }).lean();
+      if (!updated) return res.status(404).json({ error: 'Notification not found' });
+
+      const notification = { ...updated, id: String(updated._id) };
+      delete notification._id;
+      console.log('Marked regular notification as read:', id, read);
+      res.json({ notification });
+    }
   } catch (err) {
     console.error('Update notification read error', err);
     res.status(500).json({ error: 'Internal server error' });
@@ -336,9 +475,20 @@ app.patch('/notifications/:id/read', async (req, res) => {
 app.delete('/notifications/:id', async (req, res) => {
   try {
     const { id } = req.params;
-    const deleted = await Notification.findByIdAndDelete(id);
-    if (!deleted) return res.status(404).json({ error: 'Notification not found' });
-    res.status(204).send();
+
+    // Try to delete from AnonymousNotification first, then regular Notification
+    let deleted = await AnonymousNotification.findByIdAndDelete(id);
+
+    if (deleted) {
+      console.log('Deleted anonymous notification:', id);
+      res.status(204).send();
+    } else {
+      // Try regular Notification
+      deleted = await Notification.findByIdAndDelete(id);
+      if (!deleted) return res.status(404).json({ error: 'Notification not found' });
+      console.log('Deleted regular notification:', id);
+      res.status(204).send();
+    }
   } catch (err) {
     console.error('Delete notification error', err);
     res.status(500).json({ error: 'Internal server error' });
@@ -347,9 +497,19 @@ app.delete('/notifications/:id', async (req, res) => {
 
 app.post('/notifications/mark-all-read', async (req, res) => {
   try {
-    const { userId } = req.body || {};
-    if (!userId) return res.status(400).json({ error: 'userId is required' });
-    await Notification.updateMany({ userId, read: false }, { read: true });
+    const { userId, deviceId } = req.body || {};
+    if (!userId && !deviceId) return res.status(400).json({ error: 'userId or deviceId is required' });
+
+    if (userId) {
+      // Mark all regular notifications as read for registered user
+      console.log('Marking all regular notifications as read for userId:', userId);
+      await Notification.updateMany({ userId, read: false }, { read: true });
+    } else if (deviceId) {
+      // Mark all anonymous notifications as read for anonymous user
+      console.log('Marking all anonymous notifications as read for deviceId:', deviceId);
+      await AnonymousNotification.updateMany({ deviceId, read: false }, { read: true });
+    }
+
     res.json({ ok: true });
   } catch (err) {
     console.error('Mark all read error', err);

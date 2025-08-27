@@ -351,8 +351,8 @@ const renderReportCard = ({ item }: { item: any; index: number }) => (
         📝 {item.description}
       </Text>
     )}
-    {item.photoUri ? (
-      <Image source={{ uri: item.photoUri }} style={styles.thumbnail} resizeMode="cover" />
+    {(item.photoUrl || item.photoUri) ? (
+      <Image source={{ uri: item.photoUrl || item.photoUri }} style={styles.thumbnail} resizeMode="cover" />
     ) : null}
 
     <View style={styles.reportDetails}>

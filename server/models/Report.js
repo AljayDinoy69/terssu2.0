@@ -8,6 +8,8 @@ const ReportSchema = new mongoose.Schema(
     photoUrl: { type: String },
     responderId: { type: String, required: true, index: true },
     userId: { type: String },
+    // Device identifier for anonymous reports to enable targeted notifications
+    deviceId: { type: String },
     status: { type: String, enum: ['Pending', 'In-progress', 'Resolved'], default: 'Pending', index: true },
   },
   { timestamps: true }

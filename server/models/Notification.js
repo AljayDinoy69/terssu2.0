@@ -2,7 +2,8 @@ import mongoose from 'mongoose';
 
 const NotificationSchema = new mongoose.Schema(
   {
-    userId: { type: String, required: true, index: true }, // recipient account id (responder)
+    userId: { type: String, required: false }, // Optional for registered users
+    deviceId: { type: String, required: false }, // For anonymous reports
     title: { type: String, required: true },
     reportId: { type: String },
     kind: { type: String, enum: ['new', 'update'], default: 'new' },
