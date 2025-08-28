@@ -187,3 +187,18 @@ export async function markAllNotificationsRead(userId?: string, deviceId?: strin
   const res = await api.post<{ ok: boolean }>('/notifications/mark-all-read', body);
   return res.ok;
 }
+
+// Profile self-management functions
+export async function getMyProfile(email: string, password: string) {
+  const { user } = await api.post<{ user: Account }>('/auth/me', { email, password });
+  return user;
+}
+
+export async function updateMyProfile(email: string, password: string, updates: { name?: string; phone?: string }) {
+  const { user } = await api.patch<{ user: Account }>('/auth/me', { email, password, ...updates });
+  return user;
+}
+
+export async function deleteMyAccount(email: string, password: string) {
+  await api.delete<void>('/auth/me', { email, password });
+}

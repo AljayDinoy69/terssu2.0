@@ -140,6 +140,63 @@ app.post('/auth/login', async (req, res) => {
   }
 });
 
+// Profile self-management endpoints
+app.get('/auth/me', async (req, res) => {
+  try {
+    const { email, password } = req.body || {};
+    if (!email || !password) return res.status(400).json({ error: 'Email and password required' });
+    
+    const acc = await Account.findOne({ email: String(email).toLowerCase(), password });
+    if (!acc) return res.status(401).json({ error: 'Invalid credentials' });
+    
+    res.json({ user: sanitizeAccount(acc) });
+  } catch (err) {
+    console.error('Get profile error', err);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+app.patch('/auth/me', async (req, res) => {
+  try {
+    const { email, password, name, phone } = req.body || {};
+    if (!email || !password) return res.status(400).json({ error: 'Email and password required for authentication' });
+    
+    const acc = await Account.findOne({ email: String(email).toLowerCase(), password });
+    if (!acc) return res.status(401).json({ error: 'Invalid credentials' });
+    
+    // Update allowed fields
+    const updates = {};
+    if (name !== undefined) updates.name = name;
+    if (phone !== undefined) updates.phone = phone;
+    
+    const updatedDoc = await Account.findByIdAndUpdate(acc._id, updates, { new: true, projection: { password: 0 } });
+    const updated = updatedDoc ? withId(updatedDoc.toObject()) : null;
+    
+    res.json({ user: updated });
+  } catch (err) {
+    console.error('Update profile error', err);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+app.delete('/auth/me', async (req, res) => {
+  try {
+    const { email, password } = req.body || {};
+    if (!email || !password) return res.status(400).json({ error: 'Email and password required for authentication' });
+    
+    const acc = await Account.findOne({ email: String(email).toLowerCase(), password });
+    if (!acc) return res.status(401).json({ error: 'Invalid credentials' });
+    
+    // Delete the account
+    await Account.findByIdAndDelete(acc._id);
+    
+    res.status(204).send();
+  } catch (err) {
+    console.error('Delete profile error', err);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
 // Users
 app.get('/users', async (_req, res) => {
   try {

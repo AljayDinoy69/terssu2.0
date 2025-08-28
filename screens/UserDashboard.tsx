@@ -6,6 +6,7 @@ import { getCurrentUser, listReportsByUser, logout, Report, listNotifications, m
 import { API_BASE_URL } from '../utils/api';
 import { playNotificationSound } from '../utils/sound';
 import { isSoundEnabled, setSoundEnabled } from '../utils/settings';
+import ProfileModal from './ProfileModal';
 
 export type UserDashProps = NativeStackScreenProps<RootStackParamList, 'UserDashboard'>;
 
@@ -25,6 +26,8 @@ export default function UserDashboard({ navigation }: UserDashProps) {
   const unseenRef = useRef(0);
   const [unseen, setUnseen] = useState(0);
   const sseActiveRef = useRef<boolean>(false);
+  const [profileModalVisible, setProfileModalVisible] = useState(false);
+  const [currentUser, setCurrentUser] = useState<any>(null);
 
   // Animation values
   const fadeAnim = useRef(new Animated.Value(0)).current;
@@ -198,6 +201,7 @@ export default function UserDashboard({ navigation }: UserDashProps) {
   const load = async () => {
     const user = await getCurrentUser();
     if (!user) return navigation.replace('Login');
+    setCurrentUser(user); // Store current user for profile modal
     const list = await listReportsByUser(user.id);
     // Load sound preference
     try {
@@ -228,6 +232,22 @@ export default function UserDashboard({ navigation }: UserDashProps) {
   const onLogout = async () => {
     await logout();
     navigation.reset({ index: 0, routes: [{ name: 'Home' }] });
+  };
+
+  const handleProfilePress = () => {
+    setMenuOpen(false);
+    setProfileModalVisible(true);
+  };
+
+  const handleProfileUpdated = (updatedUser: any) => {
+    setCurrentUser(updatedUser);
+    // Optionally reload data if needed
+    load();
+  };
+
+  const handleAccountDeleted = () => {
+    setProfileModalVisible(false);
+    // Navigation will be handled by the modal
   };
 
   const displayed = reports
