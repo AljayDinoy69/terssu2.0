@@ -1,7 +1,7 @@
 {
   "name": "pro",
   "version": "1.0.0",
-  "main": "index.ts",
+  "main": "index.js",
   "scripts": {
     "start": "expo start",
     "android": "expo start --android",
@@ -31,7 +31,7 @@
   "devDependencies": {
     "@babel/core": "^7.25.2",
     "@types/react": "~19.0.10",
-    "@types/react-native": "^0.72.8",
+    "nodemon": "^3.1.10",
     "typescript": "~5.8.3"
   },
   "private": true

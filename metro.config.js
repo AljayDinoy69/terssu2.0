@@ -9,7 +9,8 @@ config.resolver.blockList = [
   /react-native-maps\/src\/.*/,
 ];
 
-// Alias react-native-maps to our web mock for web builds
+// For EAS builds, completely disable react-native-maps to prevent resolution issues
+// This forces the component to use the web fallback
 config.resolver.alias = {
   ...(config.resolver.alias || {}),
   'react-native-maps': require.resolve('./react-native-maps-web-mock.js'),
