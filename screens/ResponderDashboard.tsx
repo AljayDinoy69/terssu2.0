@@ -1,8 +1,8 @@
 import React, { useEffect, useState, useRef } from 'react';
 import { View, Text, StyleSheet, FlatList, TouchableOpacity, Alert, Image, ScrollView, Animated, Dimensions, Modal, Platform } from 'react-native';
 import * as Location from 'expo-location';
-import { MapComponent } from './MapComponent';
-import { ReportCard } from './ReportCard';
+import { MapComponent } from '../components/MapComponent';
+import { ReportCard } from '../components/ReportCard';
 
 import Constants from 'expo-constants';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
@@ -12,6 +12,7 @@ import { API_BASE_URL } from '../utils/api';
 import { listResponders } from '../utils/auth';
 import { playNotificationSound } from '../utils/sound';
 import { isSoundEnabled, setSoundEnabled } from '../utils/settings';
+import ProfileModal from './ProfileModal';
 
 export type ResponderDashProps = NativeStackScreenProps<RootStackParamList, 'ResponderDashboard'>;
 
@@ -41,6 +42,8 @@ export default function ResponderDashboard({ navigation }: ResponderDashProps) {
   const [notifOpen, setNotifOpen] = useState(false);
   const unseenRef = useRef(0);
   const [unseen, setUnseen] = useState(0);
+  const [profileModalVisible, setProfileModalVisible] = useState(false);
+  const [currentUser, setCurrentUser] = useState<any>(null);
   // Map modal state
   const [mapOpen, setMapOpen] = useState(false);
   const [incidentCoord, setIncidentCoord] = useState<{ lat: number; lon: number } | null>(null);
@@ -206,6 +209,7 @@ export default function ResponderDashboard({ navigation }: ResponderDashProps) {
     const user = await getCurrentUser();
     if (!user) return navigation.replace('Login');
     meRef.current = user;
+    setCurrentUser(user);
     const list = await listAssignedReports(user.id);
 
     // Build a map of account id -> name for nice display
@@ -383,6 +387,8 @@ export default function ResponderDashboard({ navigation }: ResponderDashProps) {
         <View style={styles.headerContent}>
           <Text style={styles.title}>🚑 Responder Dashboard</Text>
           <Text style={styles.subtitle}>Emergency Response Management</Text>
+          {/* Debug: show avatar URL used */}
+          <Text style={styles.debugUrl} numberOfLines={1}>{String(currentUser?.avatarUrl || currentUser?.photoUrl || '')}</Text>
         </View>
         <View style={styles.headerActions}>
           <View style={{ position: 'relative' }}>
@@ -397,7 +403,7 @@ export default function ResponderDashboard({ navigation }: ResponderDashProps) {
               )}
             </TouchableOpacity>
             {notifOpen && (
-              <View style={styles.dropdown}>
+              <View style={[styles.dropdown, { maxHeight: 360 }]}> 
                 {notifs.length === 0 ? (
                   <Text style={styles.emptyText}>No notifications yet</Text>
                 ) : (
@@ -418,6 +424,7 @@ export default function ResponderDashboard({ navigation }: ResponderDashProps) {
                         </TouchableOpacity>
                       )}
                     </View>
+                    <ScrollView style={{ maxHeight: 300 }} contentContainerStyle={{ paddingBottom: 8 }} showsVerticalScrollIndicator keyboardShouldPersistTaps="handled">
                     {notifs.map(n => (
                       <TouchableOpacity key={n.id} style={[styles.notifItem, { opacity: n.read ? 0.7 : 1 }]} onPress={() => handleNotifPress(n)} activeOpacity={0.85}>
                         <Text style={[styles.notifDot, { color: n.kind === 'new' ? '#ffd166' : '#66d9ef' }]}>•</Text>
@@ -447,6 +454,7 @@ export default function ResponderDashboard({ navigation }: ResponderDashProps) {
                         </TouchableOpacity>
                       </TouchableOpacity>
                     ))}
+                    </ScrollView>
                   </>
                 )}
               </View>
@@ -508,7 +516,7 @@ export default function ResponderDashboard({ navigation }: ResponderDashProps) {
           >
             <TouchableOpacity 
               style={styles.menuItem} 
-              onPress={() => { setMenuOpen(false); Alert.alert('Profile', 'Coming soon'); }}
+              onPress={() => { setMenuOpen(false); setProfileModalVisible(true); }}
               activeOpacity={0.7}
             >
               <Text style={styles.menuItemText}>👤 Profile</Text>
@@ -747,6 +755,15 @@ export default function ResponderDashboard({ navigation }: ResponderDashProps) {
           </View>
         </View>
       </Modal>
+      {/* Profile Modal */}
+      <ProfileModal
+        visible={profileModalVisible}
+        onClose={() => setProfileModalVisible(false)}
+        user={currentUser}
+        onProfileUpdated={(u) => { setCurrentUser(u); }}
+        onAccountDeleted={() => { setProfileModalVisible(false); }}
+        navigation={navigation}
+      />
     </View>
   );
 }
@@ -788,6 +805,12 @@ const styles = StyleSheet.create({
   subtitle: {
     fontSize: 14,
     color: '#a0a0a0',
+    marginTop: 4,
+  },
+  debugUrl: {
+    color: '#7f9cf5',
+    fontSize: 10,
+    maxWidth: 180,
     marginTop: 4,
   },
   headerActions: {

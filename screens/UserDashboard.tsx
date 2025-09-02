@@ -1,5 +1,6 @@
 import React, { useEffect, useState, useRef } from 'react';
-import { View, Text, StyleSheet, FlatList, TouchableOpacity, RefreshControl, TextInput, Alert, Animated, Dimensions, ScrollView } from 'react-native';
+import { View, Text, StyleSheet, FlatList, TouchableOpacity, RefreshControl, TextInput, Alert, Animated, Dimensions, ScrollView, Image } from 'react-native';
+
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { RootStackParamList } from '../navigation/AppNavigator';
 import { getCurrentUser, listReportsByUser, logout, Report, listNotifications, markNotificationRead, deleteNotification, markAllNotificationsRead, Notification as NotificationItem } from '../utils/auth';
@@ -234,21 +235,19 @@ export default function UserDashboard({ navigation }: UserDashProps) {
     navigation.reset({ index: 0, routes: [{ name: 'Home' }] });
   };
 
-  const handleProfilePress = () => {
-    setMenuOpen(false);
-    setProfileModalVisible(true);
-  };
+const handleProfilePress = () => {
+setMenuOpen(false);
+setProfileModalVisible(true);
+};
 
-  const handleProfileUpdated = (updatedUser: any) => {
-    setCurrentUser(updatedUser);
-    // Optionally reload data if needed
-    load();
-  };
+const handleProfileUpdated = (updatedUser: any) => {
+setCurrentUser(updatedUser);
+};
 
-  const handleAccountDeleted = () => {
-    setProfileModalVisible(false);
-    // Navigation will be handled by the modal
-  };
+const handleAccountDeleted = () => {
+setProfileModalVisible(false);
+// Navigation will be handled by the modal
+};
 
   const displayed = reports
     .filter(r => {
@@ -343,9 +342,18 @@ export default function UserDashboard({ navigation }: UserDashProps) {
       
       {/* Header */}
       <Animated.View style={[styles.header, { transform: [{ scale: headerScale }] }]}>
-        <View style={styles.headerContent}>
-          <Text style={styles.title}>📊 My Reports</Text>
-          <Text style={styles.subtitle}>Emergency Response Dashboard</Text>
+        <View style={styles.headerContentRow}>
+          <Image
+            source={currentUser?.avatarUrl || currentUser?.photoUrl ? { uri: (currentUser?.avatarUrl || currentUser?.photoUrl) as string } : require('../assets/adaptive-icon.png')}
+            style={styles.avatar}
+          />
+          <Text style={styles.userName} numberOfLines={1}>
+            {currentUser?.name || currentUser?.email || 'User'}
+          </Text>
+          {/* Debug: show avatar URL used */}
+          <Text style={styles.debugUrl} numberOfLines={1}>
+            {String(currentUser?.avatarUrl || currentUser?.photoUrl || '')}
+          </Text>
         </View>
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
           <View style={{ position: 'relative' }}>
@@ -354,7 +362,7 @@ export default function UserDashboard({ navigation }: UserDashProps) {
               {unseen > 0 && (<View style={styles.badge}><Text style={styles.badgeText}>{unseen}</Text></View>)}
             </TouchableOpacity>
             {notifOpen && (
-              <View style={styles.dropdown}>
+              <View style={[styles.dropdown, { maxHeight: 360 }]}> 
                 {notifs.length === 0 ? (
                   <Text style={styles.emptyText}>No notifications yet</Text>
                 ) : (
@@ -374,6 +382,7 @@ export default function UserDashboard({ navigation }: UserDashProps) {
                         </TouchableOpacity>
                       )}
                     </View>
+                    <ScrollView style={{ maxHeight: 300 }} contentContainerStyle={{ paddingBottom: 8 }} showsVerticalScrollIndicator keyboardShouldPersistTaps="handled">
                     {notifs.map(n => (
                       <TouchableOpacity key={n.id} style={[styles.notifItem, { opacity: n.read ? 0.7 : 1 }]} onPress={async () => {
                         try {
@@ -416,6 +425,7 @@ export default function UserDashboard({ navigation }: UserDashProps) {
                         </TouchableOpacity>
                       </TouchableOpacity>
                     ))}
+                    </ScrollView>
                   </>
                 )}
               </View>
@@ -484,7 +494,7 @@ export default function UserDashboard({ navigation }: UserDashProps) {
           >
             <TouchableOpacity 
               style={styles.menuItem} 
-              onPress={() => { setMenuOpen(false); Alert.alert('Profile', 'Coming soon'); }}
+              onPress={handleProfilePress}
               activeOpacity={0.7}
             >
               <Text style={styles.menuItemText}>👤 Profile</Text>
@@ -652,6 +662,16 @@ export default function UserDashboard({ navigation }: UserDashProps) {
           )}
         </Animated.View>
       </ScrollView>
+
+      {/* Profile Modal */}
+      <ProfileModal
+        visible={profileModalVisible}
+        onClose={() => setProfileModalVisible(false)}
+        user={currentUser}
+        onProfileUpdated={handleProfileUpdated}
+        onAccountDeleted={handleAccountDeleted}
+        navigation={navigation}
+      />
     </View>
   );
 }
@@ -685,11 +705,37 @@ const styles = StyleSheet.create({
   headerContent: {
     flex: 1,
   },
+  headerContentRow: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    maxWidth: width * 0.6,
+  },
   title: { 
     fontSize: 24, 
     fontWeight: '900', 
     color: '#fff',
     letterSpacing: 1,
+  },
+  userName: {
+    color: '#fff',
+    fontSize: 20,
+    fontWeight: '800',
+    flexShrink: 1,
+  },
+  debugUrl: {
+    color: '#7f9cf5',
+    fontSize: 10,
+    maxWidth: 160,
+  },
+  avatar: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: '#222',
+    borderWidth: 1,
+    borderColor: '#333',
   },
   subtitle: {
     fontSize: 14,

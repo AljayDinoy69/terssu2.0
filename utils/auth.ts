@@ -10,6 +10,8 @@ export type Account = {
   phone?: string;
   role: Role;
   password?: string; // optional: server does not return password
+  photoUrl?: string;
+  avatarUrl?: string;
 };
 
 export type ReportStatus = 'Pending' | 'In-progress' | 'Resolved';
@@ -194,7 +196,11 @@ export async function getMyProfile(email: string, password: string) {
   return user;
 }
 
-export async function updateMyProfile(email: string, password: string, updates: { name?: string; phone?: string }) {
+export async function updateMyProfile(
+  email: string,
+  password: string,
+  updates: { name?: string; phone?: string; photoUrl?: string; avatarUrl?: string }
+) {
   const { user } = await api.patch<{ user: Account }>('/auth/me', { email, password, ...updates });
   return user;
 }

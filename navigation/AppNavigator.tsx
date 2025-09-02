@@ -8,7 +8,7 @@ import ReportScreen from '../screens/ReportScreen';
 import UserDashboard from '../screens/UserDashboard';
 import ResponderDashboard from '../screens/ResponderDashboard';
 import AdminDashboard from '../screens/AdminDashboard';
-import AdminCreateUsers from '../screens/AdminCreateUsers';
+import AdminCreateUsers from '../components/AdminCreateUsers';
 
 export type RootStackParamList = {
   Home: undefined;

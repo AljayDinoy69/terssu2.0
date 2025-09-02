@@ -1,23 +1,51 @@
-// For Expo Go on a physical device, point to your PC's LAN IP
-// Detected IP from your ipconfig: 192.168.100.10
-export const API_BASE_URL = process.env.EXPO_PUBLIC_API_URL || 'http://192.168.100.10:4000';
+import { Platform } from 'react-native';
+
+// For local development: prefer EXPO_PUBLIC_API_URL, fallback to localhost
+function resolveBaseUrl() {
+  const raw = process.env.EXPO_PUBLIC_API_URL || 'http://localhost:4000';
+  // On Android emulator, 'localhost' and '127.0.0.1' refer to the emulator, not the dev machine.
+  if (Platform.OS === 'android') {
+    if (raw.includes('localhost')) return raw.replace('localhost', '10.0.2.2');
+    if (raw.includes('127.0.0.1')) return raw.replace('127.0.0.1', '10.0.2.2');
+  }
+  return raw;
+}
+
+export const API_BASE_URL = resolveBaseUrl();
+console.log('[API] Base URL:', API_BASE_URL);
 
 async function request<T = any>(path: string, options: RequestInit = {}): Promise<T> {
-  const res = await fetch(`${API_BASE_URL}${path}`, {
-    headers: {
-      'Content-Type': 'application/json',
-      ...(options.headers || {}),
-    },
-    ...options,
-  });
-  const text = await res.text();
-  let data: any;
-  try { data = text ? JSON.parse(text) : {}; } catch { data = { raw: text }; }
-  if (!res.ok) {
-    const msg = data?.error || res.statusText || 'Request failed';
-    throw new Error(msg);
+  const url = `${API_BASE_URL}${path}`;
+  const controller = new AbortController();
+  const timeoutMs = 12000; // 12s timeout for mobile networks
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  console.log('[API] ->', options.method || 'GET', url);
+  try {
+    const res = await fetch(url, {
+      headers: {
+        'Content-Type': 'application/json',
+        ...(options.headers || {}),
+      },
+      ...options,
+      signal: controller.signal,
+    });
+    const text = await res.text();
+    let data: any;
+    try { data = text ? JSON.parse(text) : {}; } catch { data = { raw: text }; }
+    if (!res.ok) {
+      const msg = data?.error || res.statusText || 'Request failed';
+      throw new Error(msg);
+    }
+    console.log('[API] <-', res.status, url);
+    return data as T;
+  } catch (err: any) {
+    if (err?.name === 'AbortError') {
+      throw new Error('Network timeout. Please check your API URL and connectivity.');
+    }
+    throw err;
+  } finally {
+    clearTimeout(timer);
   }
-  return data as T;
 }
 
 export const api = {

@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { View, Text, TextInput, StyleSheet, TouchableOpacity, Alert, Animated, Dimensions, Image, ImageBackground } from 'react-native';
+import { PasswordInput } from '../components/PasswordInput';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { RootStackParamList } from '../navigation/AppNavigator';
 import { login } from '../utils/auth';
@@ -153,13 +154,10 @@ export default function LoginScreen({ navigation }: LoginProps) {
         <Animated.View style={{ transform: [{ scale: inputScale2 }] }}>
           <View style={styles.inputContainer}>
             <Text style={styles.inputLabel}>🔒 Password</Text>
-            <TextInput
+            <PasswordInput
               value={password}
               onChangeText={setPassword}
               placeholder="Enter your password"
-              secureTextEntry
-              style={styles.input}
-              placeholderTextColor="#999"
             />
           </View>
         </Animated.View>

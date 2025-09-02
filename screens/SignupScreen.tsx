@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { View, Text, TextInput, StyleSheet, TouchableOpacity, Alert, ScrollView, Animated, Dimensions, TextInputProps, ImageBackground } from 'react-native';
+import { PasswordInput } from '../components/PasswordInput';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { RootStackParamList } from '../navigation/AppNavigator';
 import { signUpUser } from '../utils/auth';
@@ -215,19 +216,30 @@ export default function SignupScreen({ navigation }: SignupProps) {
                 <Text style={styles.inputLabel}>
                   {getFieldIcon(index)} {getFieldLabel(index)}
                 </Text>
-                <TextInput
-                  value={props.value}
-                  onChangeText={props.onChange}
-                  placeholder={getPlaceholder(index)}
-                  style={[
-                    styles.input,
-                    props.value.length > 0 && styles.inputFilled
-                  ]}
-                  placeholderTextColor="#999"
-                  autoCapitalize={props.autoCapitalize}
-                  keyboardType={props.keyboardType}
-                  secureTextEntry={props.secureTextEntry}
-                />
+                {props.secureTextEntry ? (
+                  <PasswordInput
+                    value={props.value}
+                    onChangeText={props.onChange}
+                    placeholder={getPlaceholder(index)}
+                    style={[
+                      styles.input,
+                      props.value.length > 0 && styles.inputFilled
+                    ]}
+                  />
+                ) : (
+                  <TextInput
+                    value={props.value}
+                    onChangeText={props.onChange}
+                    placeholder={getPlaceholder(index)}
+                    style={[
+                      styles.input,
+                      props.value.length > 0 && styles.inputFilled
+                    ]}
+                    placeholderTextColor="#999"
+                    autoCapitalize={props.autoCapitalize}
+                    keyboardType={props.keyboardType}
+                  />
+                )}
                 {props.value.length > 0 && (
                   <View style={styles.inputSuccess}>
                     <Text style={styles.successIcon}>✓</Text>
@@ -386,14 +398,15 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
   input: {
-    borderWidth: 2,
-    borderColor: '#333',
-    borderRadius: 8,
+    flex: 1,
     padding: 12,
     fontSize: 16,
-    backgroundColor: '#1a1a2e',
     color: '#fff',
-    paddingRight: 50,
+    backgroundColor: '#1a1a2e',
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#333',
+    height: 50, 
   },
   inputFilled: {
     borderColor: '#d90429',

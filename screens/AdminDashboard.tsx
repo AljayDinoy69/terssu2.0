@@ -6,6 +6,7 @@ import { createResponder, deleteAccount, getCurrentUser, listAllReports, listUse
 import { API_BASE_URL } from '../utils/api';
 import { playNotificationSound } from '../utils/sound';
 import { isSoundEnabled, setSoundEnabled } from '../utils/settings';
+import ProfileModal from './ProfileModal';
 
 export type AdminDashProps = NativeStackScreenProps<RootStackParamList, 'AdminDashboard'>;
 
@@ -43,6 +44,8 @@ export default function AdminDashboard({ navigation }: AdminDashProps) {
     phone: '',
     role: 'user'
   });
+  const [profileModalVisible, setProfileModalVisible] = useState(false);
+  const [currentUser, setCurrentUser] = useState<any>(null);
 
   // Animation values
   const fadeAnim = useRef(new Animated.Value(0)).current;
@@ -206,6 +209,7 @@ export default function AdminDashboard({ navigation }: AdminDashProps) {
 
     const me = await getCurrentUser();
     if (!me || me.role !== 'admin') return navigation.replace('Login');
+    setCurrentUser(me);
     // Load sound preference
     try {
       const pref = await isSoundEnabled();
@@ -267,15 +271,10 @@ export default function AdminDashboard({ navigation }: AdminDashProps) {
   // Profile editing functions
   const openProfileEdit = async () => {
     try {
-      const currentUser = await getCurrentUser();
-      if (currentUser) {
-        setEditProfile(currentUser);
-        setProfileForm({
-          name: currentUser.name || '',
-          email: currentUser.email || '',
-          phone: currentUser.phone || '',
-          role: currentUser.role || 'user'
-        });
+      const me = await getCurrentUser();
+      if (me) {
+        setCurrentUser(me);
+        setProfileModalVisible(true);
         setMenuOpen(false);
       }
     } catch (error) {
@@ -473,6 +472,8 @@ return (
       <View style={styles.headerContent}>
         <Text style={styles.title}>⚡ Admin Dashboard</Text>
         <Text style={styles.subtitle}>Emergency Response Control</Text>
+        {/* Debug: show avatar URL used */}
+        <Text style={styles.debugUrl} numberOfLines={1}>{String(currentUser?.avatarUrl || currentUser?.photoUrl || '')}</Text>
       </View>
       <View style={styles.headerActions}>
         <View style={{ position: 'relative' }}>
@@ -487,7 +488,7 @@ return (
             )}
           </TouchableOpacity>
           {notifOpen && (
-            <View style={styles.dropdown}>
+            <View style={[styles.dropdown, { maxHeight: 360 }]}>  
               {notifs.length === 0 ? (
                 <Text style={styles.emptyText}>No notifications yet</Text>
               ) : (
@@ -507,6 +508,7 @@ return (
                       </TouchableOpacity>
                     )}
                   </View>
+                  <ScrollView style={{ maxHeight: 300 }} contentContainerStyle={{ paddingBottom: 8 }} showsVerticalScrollIndicator keyboardShouldPersistTaps="handled">
                   {notifs.map(n => (
                     <TouchableOpacity key={n.id} style={[styles.notifItem, { opacity: n.read ? 0.7 : 1 }]} onPress={async () => {
                       // Load report and open modal
@@ -554,10 +556,11 @@ return (
                       </TouchableOpacity>
                       </TouchableOpacity>
                     ))}
-                  </>
-                )}
-              </View>
-            )}
+                  </ScrollView>
+                </>
+              )}
+            </View>
+          )}
           </View>
           <TouchableOpacity style={styles.menuBtn} onPress={() => setMenuOpen(v => !v)} activeOpacity={0.8}>
             <Text style={styles.menuBtnText}>☰</Text>
@@ -669,6 +672,16 @@ return (
                 )}
               </View>
             </ScrollView>
+
+      {/* Profile Modal */}
+      <ProfileModal
+        visible={profileModalVisible}
+        onClose={() => setProfileModalVisible(false)}
+        user={currentUser}
+        onProfileUpdated={(u) => { setCurrentUser(u); setProfileModalVisible(false); }}
+        onAccountDeleted={() => { setProfileModalVisible(false); }}
+        navigation={navigation}
+      />
 
             {/* Action Buttons */}
             <View style={styles.modalActionRow}>
@@ -981,9 +994,9 @@ return (
             <Text style={styles.sectionSubtitle}>Filter and sort reports by status to manage emergency response efficiently.</Text>
             
             {/* Report Status Filter */}
-            <View style={styles.filterRow}>
+            <View style={[styles.filterRow, reportSortDropdown && { zIndex: 4000, elevation: 60 }]}>
               <Text style={styles.sortLabel}>Filter by:</Text>
-              <View style={{ position: 'relative' }}>
+              <View style={{ position: 'relative', zIndex: reportSortDropdown ? 4000 : 1, elevation: reportSortDropdown ? 60 : 0 }}>
                 <TouchableOpacity
                   style={[styles.sortDropdownBtn, reportSortDropdown && styles.sortDropdownBtnActive]}
                   onPress={() => setReportSortDropdown(!reportSortDropdown)}
@@ -1006,11 +1019,11 @@ return (
                 {reportSortDropdown && (
                   <>
                     <TouchableOpacity 
-                      style={styles.dropdownBackdrop} 
+                      style={[styles.dropdownBackdrop]} 
                       activeOpacity={1} 
                       onPress={() => setReportSortDropdown(false)}
                     />
-                    <View style={[styles.dropdown, { top: 44, right: 0, width: 180, zIndex: 1000 }]}>
+                    <View style={[styles.dropdown, { top: 44, right: 0, width: 180, zIndex: 5000, elevation: 80 }]}>
                       {[
                         { key: 'all', label: '📋 All Reports' },
                         { key: 'pending', label: '⏳ Pending' },
@@ -1417,6 +1430,12 @@ const styles = StyleSheet.create({
   subtitle: {
     fontSize: 14,
     color: '#a0a0a0',
+    marginTop: 4,
+  },
+  debugUrl: {
+    color: '#7f9cf5',
+    fontSize: 10,
+    maxWidth: 180,
     marginTop: 4,
   },
   headerActions: {

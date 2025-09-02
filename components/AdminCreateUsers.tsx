@@ -1,5 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { View, Text, StyleSheet, TextInput, TouchableOpacity, Alert, Animated, ScrollView } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, Alert, Animated, ScrollView } from 'react-native';
+import { TextInput } from 'react-native';
+import { PasswordInput } from './PasswordInput';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { RootStackParamList } from '../navigation/AppNavigator';
 import { createResponder, createUserAdmin, getCurrentUser, listUsers, deleteAccount, updateAccount, Account } from '../utils/auth';
@@ -157,7 +159,12 @@ export default function AdminCreateUsers({ navigation }: AdminCreateUsersProps) 
             </View>
             <View style={styles.inputGroup}>
               <Text style={styles.label}>Temp Password</Text>
-              <TextInput style={styles.input} placeholder="Password" placeholderTextColor="#999" secureTextEntry value={userForm.password} onChangeText={(v)=>setUserForm(p=>({...p,password:v}))} />
+              <PasswordInput
+                value={userForm.password}
+                onChangeText={(v) => setUserForm(p => ({ ...p, password: v }))}
+                placeholder="Password"
+                style={styles.input}
+              />
             </View>
             <TouchableOpacity style={[styles.primaryBtn, loading && { opacity: 0.7 }]} onPress={onCreateUser} disabled={loading}>
               <Text style={styles.primaryBtnText}>Create User</Text>
@@ -180,7 +187,12 @@ export default function AdminCreateUsers({ navigation }: AdminCreateUsersProps) 
             </View>
             <View style={styles.inputGroup}>
               <Text style={styles.label}>Temp Password</Text>
-              <TextInput style={styles.input} placeholder="Password" placeholderTextColor="#999" secureTextEntry value={respForm.password} onChangeText={(v)=>setRespForm(p=>({...p,password:v}))} />
+              <PasswordInput
+                value={respForm.password}
+                onChangeText={(v) => setRespForm(p => ({ ...p, password: v }))}
+                placeholder="Password"
+                style={styles.input}
+              />
             </View>
             <TouchableOpacity style={[styles.primaryBtn, loading && { opacity: 0.7 }]} onPress={onCreateResponder} disabled={loading}>
               <Text style={styles.primaryBtnText}>Create Responder</Text>
@@ -214,7 +226,12 @@ export default function AdminCreateUsers({ navigation }: AdminCreateUsersProps) 
                     </View>
                     <View style={styles.row}>
                       <Text style={styles.userLabel}>Password</Text>
-                      <TextInput style={styles.userInput} placeholder="Leave blank to keep" placeholderTextColor="#999" secureTextEntry value={editForm.password} onChangeText={(v)=>setEditForm(p=>({...p,password:v}))} />
+                      <PasswordInput
+                        value={editForm.password}
+                        onChangeText={(v) => setEditForm(p => ({ ...p, password: v }))}
+                        placeholder="Leave blank to keep"
+                        style={[styles.userInput, { backgroundColor: '#111a2e' }]}
+                      />
                     </View>
                     <View style={styles.btnRow}>
                       <TouchableOpacity style={[styles.smallBtn, styles.btnSecondary]} onPress={onCancelEdit}>
