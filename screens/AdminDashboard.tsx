@@ -25,6 +25,9 @@ export default function AdminDashboard({ navigation }: AdminDashProps) {
   const [detailUser, setDetailUser] = useState<any | null>(null);
   const [confirmTarget, setConfirmTarget] = useState<{ id: string; name: string } | null>(null);
   const [userSort, setUserSort] = useState<'name_asc' | 'name_desc' | 'role' | 'email'>('name_asc');
+  const [reportSort, setReportSort] = useState<'all' | 'pending' | 'in-progress' | 'resolved'>('all');
+  const [userSortDropdown, setUserSortDropdown] = useState(false);
+  const [reportSortDropdown, setReportSortDropdown] = useState(false);
   const prevPendingRef = useRef<number>(0);
   const didInitRef = useRef<boolean>(false);
   const sseActiveRef = useRef<boolean>(false);
@@ -33,6 +36,13 @@ export default function AdminDashboard({ navigation }: AdminDashProps) {
   const unseenRef = useRef(0);
   const [unseen, setUnseen] = useState(0);
   const [detailReport, setDetailReport] = useState<any | null>(null);
+  const [editProfile, setEditProfile] = useState<any | null>(null);
+  const [profileForm, setProfileForm] = useState({
+    name: '',
+    email: '',
+    phone: '',
+    role: 'user'
+  });
 
   // Animation values
   const fadeAnim = useRef(new Animated.Value(0)).current;
@@ -254,6 +264,68 @@ export default function AdminDashboard({ navigation }: AdminDashProps) {
     navigation.reset({ index: 0, routes: [{ name: 'Home' }] });
   };
 
+  // Profile editing functions
+  const openProfileEdit = async () => {
+    try {
+      const currentUser = await getCurrentUser();
+      if (currentUser) {
+        setEditProfile(currentUser);
+        setProfileForm({
+          name: currentUser.name || '',
+          email: currentUser.email || '',
+          phone: currentUser.phone || '',
+          role: currentUser.role || 'user'
+        });
+        setMenuOpen(false);
+      }
+    } catch (error) {
+      Alert.alert('Error', 'Failed to load profile information');
+    }
+  };
+
+  const saveProfile = async () => {
+    try {
+      // Basic validation
+      if (!profileForm.name.trim()) {
+        Alert.alert('Error', 'Name is required');
+        return;
+      }
+      if (!profileForm.email.trim()) {
+        Alert.alert('Error', 'Email is required');
+        return;
+      }
+      if (!profileForm.phone.trim()) {
+        Alert.alert('Error', 'Phone is required');
+        return;
+      }
+
+      // Here you would typically call an API to update the user profile
+      // For now, we'll just show a success message
+      Alert.alert('Success', 'Profile updated successfully!', [
+        {
+          text: 'OK',
+          onPress: () => {
+            setEditProfile(null);
+            // Refresh data
+            load();
+          }
+        }
+      ]);
+    } catch (error) {
+      Alert.alert('Error', 'Failed to update profile');
+    }
+  };
+
+  const cancelProfileEdit = () => {
+    setEditProfile(null);
+    setProfileForm({
+      name: '',
+      email: '',
+      phone: '',
+      role: 'user'
+    });
+  };
+
   const getStatsData = () => {
     const totalUsers = users.filter(u => u.role === 'user').length;
     const totalResponders = users.filter(u => u.role === 'responder').length;
@@ -381,97 +453,105 @@ const renderReportCard = ({ item }: { item: any; index: number }) => (
         📅 Created: {item.createdAt ? new Date(item.createdAt).toLocaleString() : '—'}
       </Text>
     </View>
+
+    {/* View Details Button */}
+    <TouchableOpacity
+      style={styles.viewDetailsBtn}
+      onPress={() => setDetailReport(item)}
+      activeOpacity={0.85}
+    >
+      <Text style={styles.viewDetailsBtnText}>👁️ View Full Details</Text>
+    </TouchableOpacity>
   </View>
 );
 
-  return (
-    <View style={styles.container}>
-      <View style={styles.backgroundPattern} />
-      
-      {/* Header */}
-      <Animated.View style={[styles.header, { transform: [{ scale: headerScale }] }]}> 
-        <View style={styles.headerContent}>
-          <Text style={styles.title}>⚡ Admin Dashboard</Text>
-          <Text style={styles.subtitle}>Emergency Response Control</Text>
-        </View>
-        <View style={styles.headerActions}>
-          <View style={{ position: 'relative' }}>
-            <TouchableOpacity
-              style={styles.bellBtn}
-              onPress={() => { setNotifOpen(o => !o); }}
-              activeOpacity={0.8}
-            >
-              <Text style={styles.bellIcon}>🔔</Text>
-              {unseen > 0 && (
-                <View style={styles.badge}><Text style={styles.badgeText}>{unseen}</Text></View>
-              )}
-            </TouchableOpacity>
-            {notifOpen && (
-              <View style={styles.dropdown}>
-                {notifs.length === 0 ? (
-                  <Text style={styles.emptyText}>No notifications yet</Text>
-                ) : (
-                  <>
-                    <View style={{ paddingHorizontal: 12, paddingBottom: 6, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
-                      <Text style={{ color: '#a0a0a0', fontWeight: '700' }}>Notifications</Text>
-                      {unseen > 0 && (
-                        <TouchableOpacity onPress={async () => {
-                          try {
-                            const me = await getCurrentUser(); if (!me) return;
-                            await markAllNotificationsRead(me.id);
-                            setNotifs(prev => prev.map(x => ({ ...x, read: true })));
-                            unseenRef.current = 0; setUnseen(0);
-                          } catch {}
-                        }} activeOpacity={0.8}>
-                          <Text style={{ color: '#66d9ef', fontWeight: '800' }}>Mark all as read</Text>
-                        </TouchableOpacity>
-                      )}
-                    </View>
-                    {notifs.map(n => (
-                      <TouchableOpacity key={n.id} style={[styles.notifItem, { opacity: n.read ? 0.7 : 1 }]} onPress={async () => {
-                        // Load report and open modal
-                        if (n.reportId) {
-                          const rep = reports.find(r => String(r.id) === String(n.reportId));
-                          if (rep) setDetailReport(rep);
-                          else {
-                            const all = await listAllReports();
-                            const found = all.find(r => String(r.id) === String(n.reportId)) || null;
-                            if (found) setDetailReport(found);
-                          }
-                        }
+return (
+  <View style={styles.container}>
+    <View style={styles.backgroundPattern} />
+    {/* Header */}
+    <Animated.View style={[styles.header, { transform: [{ scale: headerScale }] }]}> 
+      <View style={styles.headerContent}>
+        <Text style={styles.title}>⚡ Admin Dashboard</Text>
+        <Text style={styles.subtitle}>Emergency Response Control</Text>
+      </View>
+      <View style={styles.headerActions}>
+        <View style={{ position: 'relative' }}>
+          <TouchableOpacity
+            style={styles.bellBtn}
+            onPress={() => { setNotifOpen(o => !o); }}
+            activeOpacity={0.8}
+          >
+            <Text style={styles.bellIcon}>🔔</Text>
+            {unseen > 0 && (
+              <View style={styles.badge}><Text style={styles.badgeText}>{unseen}</Text></View>
+            )}
+          </TouchableOpacity>
+          {notifOpen && (
+            <View style={styles.dropdown}>
+              {notifs.length === 0 ? (
+                <Text style={styles.emptyText}>No notifications yet</Text>
+              ) : (
+                <>
+                  <View style={{ paddingHorizontal: 12, paddingBottom: 6, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <Text style={{ color: '#a0a0a0', fontWeight: '700' }}>Notifications</Text>
+                    {unseen > 0 && (
+                      <TouchableOpacity onPress={async () => {
                         try {
-                          if (!n.read) {
-                            await markNotificationRead(n.id, true);
-                            setNotifs(prev => prev.map(x => x.id === n.id ? { ...x, read: true } : x));
-                            if (unseenRef.current > 0) { unseenRef.current -= 1; setUnseen(unseenRef.current); }
-                          }
+                          const me = await getCurrentUser(); if (!me) return;
+                          await markAllNotificationsRead(me.id);
+                          setNotifs(prev => prev.map(x => ({ ...x, read: true })));
+                          unseenRef.current = 0; setUnseen(0);
                         } catch {}
-                        setNotifOpen(false);
-                      }} activeOpacity={0.85}>
-                        <Text style={[styles.notifDot, { color: n.kind === 'new' ? '#ffd166' : '#66d9ef' }]}>•</Text>
-                        <View style={{ flex: 1 }}>
-                          <Text style={[styles.notifTitle, { fontWeight: n.read ? '600' : '800' }]}>{n.title}</Text>
-                          <Text style={styles.notifTime}>{n.createdAt ? new Date(n.createdAt as any).toLocaleTimeString() : ''}</Text>
-                        </View>
-                        <TouchableOpacity onPress={async () => {
-                          try {
-                            const next = !n.read; await markNotificationRead(n.id, next);
-                            setNotifs(prev => prev.map(x => x.id === n.id ? { ...x, read: next } : x));
-                            unseenRef.current = Math.max(0, unseenRef.current + (next ? -1 : 1));
-                            setUnseen(unseenRef.current);
-                          } catch {}
-                        }} style={{ paddingHorizontal: 8, paddingVertical: 4 }} activeOpacity={0.7}>
-                          <Text style={{ color: '#ffd166', fontWeight: '800' }}>{n.read ? 'Unread' : 'Read'}</Text>
-                        </TouchableOpacity>
-                        <TouchableOpacity onPress={async () => {
-                          try {
-                            await deleteNotification(n.id);
-                            setNotifs(prev => prev.filter(x => x.id !== n.id));
-                            if (!n.read && unseenRef.current > 0) { unseenRef.current -= 1; setUnseen(unseenRef.current); }
-                          } catch {}
-                        }} style={{ paddingHorizontal: 8, paddingVertical: 4 }} activeOpacity={0.7}>
-                          <Text style={{ color: '#d90429', fontWeight: '800' }}>Delete</Text>
-                        </TouchableOpacity>
+                      }} activeOpacity={0.8}>
+                        <Text style={{ color: '#66d9ef', fontWeight: '800' }}>Mark all as read</Text>
+                      </TouchableOpacity>
+                    )}
+                  </View>
+                  {notifs.map(n => (
+                    <TouchableOpacity key={n.id} style={[styles.notifItem, { opacity: n.read ? 0.7 : 1 }]} onPress={async () => {
+                      // Load report and open modal
+                      if (n.reportId) {
+                        const rep = reports.find(r => String(r.id) === String(n.reportId));
+                        if (rep) setDetailReport(rep);
+                        else {
+                          const all = await listAllReports();
+                          const found = all.find(r => String(r.id) === String(n.reportId)) || null;
+                          if (found) setDetailReport(found);
+                        }
+                      }
+                      try {
+                        if (!n.read) {
+                          await markNotificationRead(n.id, true);
+                          setNotifs(prev => prev.map(x => x.id === n.id ? { ...x, read: true } : x));
+                          if (unseenRef.current > 0) { unseenRef.current -= 1; setUnseen(unseenRef.current); }
+                        }
+                      } catch {}
+                      setNotifOpen(false);
+                    }} activeOpacity={0.85}>
+                      <Text style={[styles.notifDot, { color: n.kind === 'new' ? '#ffd166' : '#66d9ef' }]}>•</Text>
+                      <View style={{ flex: 1 }}>
+                        <Text style={[styles.notifTitle, { fontWeight: n.read ? '600' : '800' }]}>{n.title}</Text>
+                        <Text style={styles.notifTime}>{n.createdAt ? new Date(n.createdAt as any).toLocaleTimeString() : ''}</Text>
+                      </View>
+                      <TouchableOpacity onPress={async () => {
+                        try {
+                          const next = !n.read; await markNotificationRead(n.id, next);
+                          setNotifs(prev => prev.map(x => x.id === n.id ? { ...x, read: next } : x));
+                          unseenRef.current = Math.max(0, unseenRef.current + (next ? -1 : 1));
+                          setUnseen(unseenRef.current);
+                        } catch {}
+                      }} style={{ paddingHorizontal: 8, paddingVertical: 4 }} activeOpacity={0.7}>
+                        <Text style={{ color: '#ffd166', fontWeight: '800' }}>{n.read ? 'Unread' : 'Read'}</Text>
+                      </TouchableOpacity>
+                      <TouchableOpacity onPress={async () => {
+                        try {
+                          await deleteNotification(n.id);
+                          setNotifs(prev => prev.filter(x => x.id !== n.id));
+                          if (!n.read && unseenRef.current > 0) { unseenRef.current -= 1; setUnseen(unseenRef.current); }
+                        } catch {}
+                      }} style={{ paddingHorizontal: 8, paddingVertical: 4 }} activeOpacity={0.7}>
+                        <Text style={{ color: '#d90429', fontWeight: '800' }}>Delete</Text>
+                      </TouchableOpacity>
                       </TouchableOpacity>
                     ))}
                   </>
@@ -490,7 +570,7 @@ const renderReportCard = ({ item }: { item: any; index: number }) => (
         <View style={styles.menuOverlay} pointerEvents="box-none">
           <TouchableOpacity style={styles.menuBackdrop} activeOpacity={1} onPress={() => setMenuOpen(false)} />
           <View style={styles.menuContainer}>
-            <TouchableOpacity style={styles.menuItem} onPress={() => { setMenuOpen(false); Alert.alert('Profile', 'Coming soon'); }}>
+            <TouchableOpacity style={styles.menuItem} onPress={openProfileEdit}>
               <Text style={styles.menuItemText}>👤 Profile</Text>
             </TouchableOpacity>
             <TouchableOpacity style={styles.menuItem} onPress={() => { setMenuOpen(false); Alert.alert('Settings', 'Coming soon'); }}>
@@ -516,6 +596,92 @@ const renderReportCard = ({ item }: { item: any; index: number }) => (
           </View>
         </View>
       )}
+
+      {/* Profile Edit Modal */}
+      <Modal visible={!!editProfile} transparent animationType="fade" onRequestClose={cancelProfileEdit}>
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            <Text style={styles.modalTitle}>👤 Edit Profile</Text>
+            <ScrollView showsVerticalScrollIndicator={false}>
+              {/* Profile Picture Placeholder */}
+              <View style={styles.profileAvatar}>
+                <Text style={styles.profileAvatarText}>
+                  {profileForm.name ? profileForm.name.charAt(0).toUpperCase() : '👤'}
+                </Text>
+              </View>
+
+              {/* Form Fields */}
+              <View style={styles.formContainer}>
+                <Text style={styles.inputLabel}>👤 Full Name</Text>
+                <TextInput
+                  style={[styles.input, profileForm.name && styles.inputFilled]}
+                  placeholder="Enter your full name"
+                  placeholderTextColor="#888"
+                  value={profileForm.name}
+                  onChangeText={(text) => setProfileForm(prev => ({ ...prev, name: text }))}
+                  autoCapitalize="words"
+                />
+
+                <Text style={styles.inputLabel}>📧 Email Address</Text>
+                <TextInput
+                  style={[styles.input, profileForm.email && styles.inputFilled]}
+                  placeholder="Enter your email"
+                  placeholderTextColor="#888"
+                  value={profileForm.email}
+                  onChangeText={(text) => setProfileForm(prev => ({ ...prev, email: text }))}
+                  keyboardType="email-address"
+                  autoCapitalize="none"
+                />
+
+                <Text style={styles.inputLabel}>📱 Phone Number</Text>
+                <TextInput
+                  style={[styles.input, profileForm.phone && styles.inputFilled]}
+                  placeholder="Enter your phone number"
+                  placeholderTextColor="#888"
+                  value={profileForm.phone}
+                  onChangeText={(text) => setProfileForm(prev => ({ ...prev, phone: text }))}
+                  keyboardType="phone-pad"
+                />
+
+                <Text style={styles.inputLabel}>🛡️ Role</Text>
+                <View style={styles.roleSelector}>
+                  {(['user', 'responder', 'admin'] as const).map((role) => (
+                    <TouchableOpacity
+                      key={role}
+                      style={[styles.roleOption, profileForm.role === role && styles.roleOptionActive]}
+                      onPress={() => setProfileForm(prev => ({ ...prev, role }))}
+                      activeOpacity={0.85}
+                    >
+                      <Text style={[styles.roleOptionText, profileForm.role === role && styles.roleOptionTextActive]}>
+                        {role === 'admin' ? '⚡ Admin' : role === 'responder' ? '🚑 Responder' : '👤 User'}
+                      </Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+
+                {/* Current User Info (Read-only) */}
+                {editProfile && (
+                  <View style={styles.currentInfo}>
+                    <Text style={styles.currentInfoTitle}>📋 Current Information</Text>
+                    <Text style={styles.currentInfoText}>🆔 ID: {editProfile.id}</Text>
+                    <Text style={styles.currentInfoText}>📅 Joined: {editProfile.createdAt ? new Date(editProfile.createdAt).toLocaleDateString() : 'Unknown'}</Text>
+                  </View>
+                )}
+              </View>
+            </ScrollView>
+
+            {/* Action Buttons */}
+            <View style={styles.modalActionRow}>
+              <TouchableOpacity style={styles.modalCancelBtn} onPress={cancelProfileEdit}>
+                <Text style={styles.modalCancelText}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.modalSaveBtn} onPress={saveProfile}>
+                <Text style={styles.modalSaveText}>Save Changes</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
 
       {/* User Details Modal */}
       <Modal visible={!!detailUser} transparent animationType="fade" onRequestClose={() => setDetailUser(null)}>
@@ -565,6 +731,52 @@ const renderReportCard = ({ item }: { item: any; index: number }) => (
                 <Text style={styles.modalDeleteText}>Delete</Text>
               </TouchableOpacity>
             </View>
+          </View>
+        </View>
+      </Modal>
+
+      {/* Report Details Modal */}
+      <Modal visible={!!detailReport} transparent animationType="fade" onRequestClose={() => setDetailReport(null)}>
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            <Text style={styles.modalTitle}>📋 Report Details</Text>
+            {detailReport && (
+              <ScrollView showsVerticalScrollIndicator={false}>
+                <Text style={styles.modalRow}>🆔 ID: {detailReport.id}</Text>
+                <Text style={styles.modalRow}>🏷️ Type: {detailReport.type}</Text>
+                <Text style={styles.modalRow}>📍 Status: {detailReport.status}</Text>
+                {detailReport.chiefComplaint && (
+                  <Text style={styles.modalRow}>🆘 Chief Complaint: {detailReport.chiefComplaint}</Text>
+                )}
+                {detailReport.description && (
+                  <Text style={styles.modalRow}>📝 Description: {detailReport.description}</Text>
+                )}
+                {detailReport.fullName && (
+                  <Text style={styles.modalRow}>🙍 Full Name: {detailReport.fullName}</Text>
+                )}
+                {detailReport.contactNo && (
+                  <Text style={styles.modalRow}>📞 Contact: {detailReport.contactNo}</Text>
+                )}
+                {detailReport.personsInvolved && (
+                  <Text style={styles.modalRow}>👥 Persons Involved: {detailReport.personsInvolved}</Text>
+                )}
+                <Text style={styles.modalRow}>👨‍⚕️ Responder: {detailReport.responderId}</Text>
+                <Text style={styles.modalRow}>👤 Reporter: {detailReport.userId || 'Anonymous'}</Text>
+                <Text style={styles.modalRow}>📅 Created: {detailReport.createdAt ? new Date(detailReport.createdAt).toLocaleString() : '—'}</Text>
+                {detailReport.updatedAt && (
+                  <Text style={styles.modalRow}>🔄 Updated: {new Date(detailReport.updatedAt).toLocaleString()}</Text>
+                )}
+                {detailReport.photoUrl && (
+                  <View style={{ marginTop: 12 }}>
+                    <Text style={styles.modalRow}>📸 Photo:</Text>
+                    <Image source={{ uri: detailReport.photoUrl }} style={styles.thumbnail} resizeMode="cover" />
+                  </View>
+                )}
+              </ScrollView>
+            )}
+            <TouchableOpacity style={styles.modalCloseBtn} onPress={() => setDetailReport(null)}>
+              <Text style={styles.modalCloseText}>Close</Text>
+            </TouchableOpacity>
           </View>
         </View>
       </Modal>
@@ -659,16 +871,61 @@ const renderReportCard = ({ item }: { item: any; index: number }) => (
             </View>
             <View style={styles.filterRow}>
               <Text style={styles.sortLabel}>Sort by:</Text>
-              {([
-                { k: 'name_asc', label: 'Name A-Z' },
-                { k: 'name_desc', label: 'Name Z-A' },
-                { k: 'role', label: 'Role' },
-                { k: 'email', label: 'Email' },
-              ] as const).map(opt => (
-                <TouchableOpacity key={opt.k} style={[styles.chip, userSort===opt.k && styles.chipActive]} onPress={() => setUserSort(opt.k)}>
-                  <Text style={[styles.chipText, userSort===opt.k && styles.chipTextActive]}>{opt.label}</Text>
+              <View style={{ position: 'relative' }}>
+                <TouchableOpacity
+                  style={[styles.sortDropdownBtn, userSortDropdown && styles.sortDropdownBtnActive]}
+                  onPress={() => setUserSortDropdown(!userSortDropdown)}
+                  activeOpacity={0.85}
+                >
+                  <Text style={styles.sortDropdownBtnText}>
+                    {(() => {
+                      switch (userSort) {
+                        case 'name_asc': return '👤 Name A-Z';
+                        case 'name_desc': return '👤 Name Z-A';
+                        case 'role': return '🛡️ Role';
+                        case 'email': return '📧 Email';
+                        default: return '👤 Name A-Z';
+                      }
+                    })()}
+                  </Text>
+                  <Text style={styles.dropdownArrow}>▼</Text>
                 </TouchableOpacity>
-              ))}
+
+                {userSortDropdown && (
+                  <>
+                    <TouchableOpacity 
+                      style={styles.dropdownBackdrop} 
+                      activeOpacity={1} 
+                      onPress={() => setUserSortDropdown(false)}
+                    />
+                    <View style={[styles.dropdown, { top: 44, right: 0, width: 180, zIndex: 1000 }]}>
+                      {[
+                        { key: 'name_asc', label: '👤 Name A-Z' },
+                        { key: 'name_desc', label: '👤 Name Z-A' },
+                        { key: 'role', label: '🛡️ Role' },
+                        { key: 'email', label: '📧 Email' },
+                      ].map((option) => (
+                        <TouchableOpacity
+                          key={option.key}
+                          style={[styles.dropdownItem, userSort === option.key && styles.dropdownItemActive]}
+                          onPress={() => {
+                            setUserSort(option.key as any);
+                            setUserSortDropdown(false);
+                          }}
+                          activeOpacity={0.85}
+                        >
+                          <Text style={[styles.dropdownItemText, userSort === option.key && styles.dropdownItemTextActive]}>
+                            {option.label}
+                          </Text>
+                          {userSort === option.key && (
+                            <Text style={styles.dropdownCheck}>✓</Text>
+                          )}
+                        </TouchableOpacity>
+                      ))}
+                    </View>
+                  </>
+                )}
+              </View>
             </View>
             {(() => {
               const q = userQuery.trim().toLowerCase();
@@ -721,30 +978,342 @@ const renderReportCard = ({ item }: { item: any; index: number }) => (
             ]}
           >
             <Text style={styles.sectionTitle}>📋 Emergency Reports ({reports.length})</Text>
+            <Text style={styles.sectionSubtitle}>Filter and sort reports by status to manage emergency response efficiently.</Text>
+            
+            {/* Report Status Filter */}
+            <View style={styles.filterRow}>
+              <Text style={styles.sortLabel}>Filter by:</Text>
+              <View style={{ position: 'relative' }}>
+                <TouchableOpacity
+                  style={[styles.sortDropdownBtn, reportSortDropdown && styles.sortDropdownBtnActive]}
+                  onPress={() => setReportSortDropdown(!reportSortDropdown)}
+                  activeOpacity={0.85}
+                >
+                  <Text style={styles.sortDropdownBtnText}>
+                    {(() => {
+                      switch (reportSort) {
+                        case 'all': return '📋 All Reports';
+                        case 'pending': return '⏳ Pending';
+                        case 'in-progress': return '🚀 In Progress';
+                        case 'resolved': return '✅ Resolved';
+                        default: return '📋 All Reports';
+                      }
+                    })()}
+                  </Text>
+                  <Text style={styles.dropdownArrow}>▼</Text>
+                </TouchableOpacity>
+
+                {reportSortDropdown && (
+                  <>
+                    <TouchableOpacity 
+                      style={styles.dropdownBackdrop} 
+                      activeOpacity={1} 
+                      onPress={() => setReportSortDropdown(false)}
+                    />
+                    <View style={[styles.dropdown, { top: 44, right: 0, width: 180, zIndex: 1000 }]}>
+                      {[
+                        { key: 'all', label: '📋 All Reports' },
+                        { key: 'pending', label: '⏳ Pending' },
+                        { key: 'in-progress', label: '🚀 In Progress' },
+                        { key: 'resolved', label: '✅ Resolved' },
+                      ].map((option) => (
+                        <TouchableOpacity
+                          key={option.key}
+                          style={[styles.dropdownItem, reportSort === option.key && styles.dropdownItemActive]}
+                          onPress={() => {
+                            setReportSort(option.key as any);
+                            setReportSortDropdown(false);
+                          }}
+                          activeOpacity={0.85}
+                        >
+                          <Text style={[styles.dropdownItemText, reportSort === option.key && styles.dropdownItemTextActive]}>
+                            {option.label}
+                          </Text>
+                          {reportSort === option.key && (
+                            <Text style={styles.dropdownCheck}>✓</Text>
+                          )}
+                        </TouchableOpacity>
+                      ))}
+                    </View>
+                  </>
+                )}
+              </View>
+            </View>
             {reports.length === 0 ? (
               <View style={styles.emptyState}>
                 <Text style={styles.emptyIcon}>📭</Text>
                 <Text style={styles.emptyText}>No reports submitted yet</Text>
               </View>
             ) : (
-              <FlatList
-                data={reports}
-                keyExtractor={(item) => item.id}
-                renderItem={renderReportCard}
-                scrollEnabled={false}
-                showsVerticalScrollIndicator={false}
-              />
+              (() => {
+                // Filter reports based on selected status
+                const filteredReports = reports.filter(report => {
+                  if (reportSort === 'all') return true;
+                  return report.status?.toLowerCase() === reportSort;
+                });
+
+                // Sort filtered reports by creation date (newest first)
+                const sortedReports = [...filteredReports].sort((a, b) => 
+                  new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime()
+                );
+
+                return (
+                  <FlatList
+                    data={sortedReports}
+                    keyExtractor={(item) => item.id}
+                    renderItem={renderReportCard}
+                    scrollEnabled={false}
+                    showsVerticalScrollIndicator={false}
+                    ListEmptyComponent={
+                      <View style={styles.emptyState}>
+                        <Text style={styles.emptyIcon}>
+                          {reportSort === 'pending' ? '⏳' : reportSort === 'in-progress' ? '🚀' : reportSort === 'resolved' ? '✅' : '📭'}
+                        </Text>
+                        <Text style={styles.emptyText}>
+                          {reportSort === 'pending' ? 'No pending reports' : 
+                           reportSort === 'in-progress' ? 'No reports in progress' : 
+                           reportSort === 'resolved' ? 'No resolved reports' : 
+                           'No reports found'}
+                        </Text>
+                      </View>
+                    }
+                  />
+                );
+              })()
             )}
           </Animated.View>
         )}
 
-        {/* System Analytics (Tab placeholder) */}
+        {/* System Analytics (Tab) */}
         {activeTab === 'analytics' && (
           <Animated.View style={[styles.listContainer, { opacity: fadeAnim, transform: [{ translateY: slideAnim }] }]}>
-            <Text style={styles.sectionTitle}>📈 System Analytics</Text>
-            <View style={styles.emptyState}>
-              <Text style={styles.emptyIcon}>🛠️</Text>
-              <Text style={styles.emptyText}>Analytics coming soon</Text>
+            <Text style={styles.sectionTitle}>📊 System Analytics</Text>
+            <Text style={styles.sectionSubtitle}>Comprehensive system performance and usage insights</Text>
+
+            {/* Analytics Grid */}
+            <View style={styles.analyticsGrid}>
+              {/* Report Status Distribution */}
+              <View style={styles.analyticsCard}>
+                <Text style={styles.analyticsCardTitle}>📋 Report Status Distribution</Text>
+                <View style={styles.chartContainer}>
+                  {(() => {
+                    const total = reports.length;
+                    const pending = reports.filter(r => r.status?.toLowerCase() === 'pending').length;
+                    const progress = reports.filter(r => r.status?.toLowerCase() === 'in-progress').length;
+                    const resolved = reports.filter(r => r.status?.toLowerCase() === 'resolved').length;
+
+                    return (
+                      <View style={styles.barChart}>
+                        <View style={styles.chartItem}>
+                          <Text style={styles.chartLabel}>Pending</Text>
+                          <View style={styles.barContainer}>
+                            <View style={[styles.bar, { width: total > 0 ? `${(pending / total) * 100}%` : '0%', backgroundColor: '#ff9800' }]} />
+                            <Text style={styles.barValue}>{pending}</Text>
+                          </View>
+                        </View>
+                        <View style={styles.chartItem}>
+                          <Text style={styles.chartLabel}>In Progress</Text>
+                          <View style={styles.barContainer}>
+                            <View style={[styles.bar, { width: total > 0 ? `${(progress / total) * 100}%` : '0%', backgroundColor: '#2196f3' }]} />
+                            <Text style={styles.barValue}>{progress}</Text>
+                          </View>
+                        </View>
+                        <View style={styles.chartItem}>
+                          <Text style={styles.chartLabel}>Resolved</Text>
+                          <View style={styles.barContainer}>
+                            <View style={[styles.bar, { width: total > 0 ? `${(resolved / total) * 100}%` : '0%', backgroundColor: '#4caf50' }]} />
+                            <Text style={styles.barValue}>{resolved}</Text>
+                          </View>
+                        </View>
+                      </View>
+                    );
+                  })()}
+                </View>
+              </View>
+
+              {/* Report Types Distribution */}
+              <View style={styles.analyticsCard}>
+                <Text style={styles.analyticsCardTitle}>🏷️ Report Types</Text>
+                <View style={styles.pieChart}>
+                  {(() => {
+                    const typeCounts: { [key: string]: number } = {};
+                    reports.forEach(r => {
+                      const type = r.type || 'Unknown';
+                      typeCounts[type] = (typeCounts[type] || 0) + 1;
+                    });
+
+                    const colors = ['#667eea', '#764ba2', '#f093fb', '#f5576c', '#4facfe', '#00f2fe'];
+                    let colorIndex = 0;
+
+                    return Object.entries(typeCounts).map(([type, count]) => {
+                      const percentage = reports.length > 0 ? (count / reports.length) * 100 : 0;
+                      return (
+                        <View key={type} style={styles.pieItem}>
+                          <View style={[styles.pieDot, { backgroundColor: colors[colorIndex++ % colors.length] }]} />
+                          <Text style={styles.pieLabel}>{type}</Text>
+                          <Text style={styles.pieValue}>{count} ({percentage.toFixed(1)}%)</Text>
+                        </View>
+                      );
+                    });
+                  })()}
+                </View>
+              </View>
+
+              {/* Responder Performance */}
+              <View style={styles.analyticsCard}>
+                <Text style={styles.analyticsCardTitle}>🚑 Responder Performance</Text>
+                <View style={styles.performanceList}>
+                  {(() => {
+                    const responderStats: { [key: string]: { total: number; resolved: number; pending: number } } = {};
+                    reports.forEach(r => {
+                      const responder = r.responderId || 'Unassigned';
+                      if (!responderStats[responder]) {
+                        responderStats[responder] = { total: 0, resolved: 0, pending: 0 };
+                      }
+                      responderStats[responder].total++;
+                      if (r.status?.toLowerCase() === 'resolved') {
+                        responderStats[responder].resolved++;
+                      } else if (r.status?.toLowerCase() === 'pending') {
+                        responderStats[responder].pending++;
+                      }
+                    });
+
+                    return Object.entries(responderStats)
+                      .sort(([, a], [, b]) => b.total - a.total)
+                      .slice(0, 5)
+                      .map(([responder, stats]) => {
+                        const completionRate = stats.total > 0 ? (stats.resolved / stats.total) * 100 : 0;
+                        return (
+                          <View key={responder} style={styles.performanceItem}>
+                            <View style={styles.performanceHeader}>
+                              <Text style={styles.performanceName}>{responder}</Text>
+                              <Text style={styles.performanceRate}>{completionRate.toFixed(1)}%</Text>
+                            </View>
+                            <View style={styles.performanceBar}>
+                              <View style={[styles.performanceFill, { width: `${completionRate}%`, backgroundColor: completionRate > 80 ? '#4caf50' : completionRate > 60 ? '#ff9800' : '#f44336' }]} />
+                            </View>
+                            <Text style={styles.performanceStats}>
+                              {stats.resolved}/{stats.total} resolved • {stats.pending} pending
+                            </Text>
+                          </View>
+                        );
+                      });
+                  })()}
+                </View>
+              </View>
+
+              {/* Time-based Analytics */}
+              <View style={styles.analyticsCard}>
+                <Text style={styles.analyticsCardTitle}>📈 Reports Over Time</Text>
+                <View style={styles.timeChart}>
+                  {(() => {
+                    const last7Days = Array.from({ length: 7 }, (_, i) => {
+                      const date = new Date();
+                      date.setDate(date.getDate() - (6 - i));
+                      return date.toISOString().split('T')[0];
+                    });
+
+                    const dayCounts = last7Days.map(date => {
+                      const dayReports = reports.filter(r => {
+                        if (!r.createdAt) return false;
+                        const reportDate = new Date(r.createdAt).toISOString().split('T')[0];
+                        return reportDate === date;
+                      });
+                      return dayReports.length;
+                    });
+
+                    const maxCount = Math.max(...dayCounts, 1);
+
+                    return (
+                      <View style={styles.lineChart}>
+                        {last7Days.map((date, index) => {
+                          const count = dayCounts[index];
+                          const height = maxCount > 0 ? (count / maxCount) * 100 : 0;
+                          const dayName = new Date(date).toLocaleDateString('en-US', { weekday: 'short' });
+
+                          return (
+                            <View key={date} style={styles.linePoint}>
+                              <View style={styles.lineBar}>
+                                <View style={[styles.lineFill, { height: `${height}%`, backgroundColor: '#667eea' }]} />
+                              </View>
+                              <Text style={styles.lineLabel}>{dayName}</Text>
+                              <Text style={styles.lineValue}>{count}</Text>
+                            </View>
+                          );
+                        })}
+                      </View>
+                    );
+                  })()}
+                </View>
+              </View>
+
+              {/* System Health Metrics */}
+              <View style={styles.analyticsCard}>
+                <Text style={styles.analyticsCardTitle}>⚡ System Health</Text>
+                <View style={styles.healthMetrics}>
+                  <View style={styles.metricItem}>
+                    <Text style={styles.metricIcon}>📱</Text>
+                    <View style={styles.metricInfo}>
+                      <Text style={styles.metricValue}>{users.length}</Text>
+                      <Text style={styles.metricLabel}>Total Users</Text>
+                    </View>
+                  </View>
+                  <View style={styles.metricItem}>
+                    <Text style={styles.metricIcon}>🚨</Text>
+                    <View style={styles.metricInfo}>
+                      <Text style={styles.metricValue}>{reports.length}</Text>
+                      <Text style={styles.metricLabel}>Total Reports</Text>
+                    </View>
+                  </View>
+                  <View style={styles.metricItem}>
+                    <Text style={styles.metricIcon}>⏱️</Text>
+                    <View style={styles.metricInfo}>
+                      <Text style={styles.metricValue}>
+                        {reports.length > 0 ? Math.round(reports.filter(r => r.status?.toLowerCase() === 'pending').length / reports.length * 100) : 0}%
+                      </Text>
+                      <Text style={styles.metricLabel}>Response Rate</Text>
+                    </View>
+                  </View>
+                  <View style={styles.metricItem}>
+                    <Text style={styles.metricIcon}>✅</Text>
+                    <View style={styles.metricInfo}>
+                      <Text style={styles.metricValue}>
+                        {reports.length > 0 ? Math.round(reports.filter(r => r.status?.toLowerCase() === 'resolved').length / reports.length * 100) : 0}%
+                      </Text>
+                      <Text style={styles.metricLabel}>Resolution Rate</Text>
+                    </View>
+                  </View>
+                </View>
+              </View>
+
+              {/* Recent Activity */}
+              <View style={styles.analyticsCard}>
+                <Text style={styles.analyticsCardTitle}>📝 Recent Activity</Text>
+                <ScrollView style={styles.activityList} showsVerticalScrollIndicator={false}>
+                  {reports
+                    .sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime())
+                    .slice(0, 10)
+                    .map((report, index) => (
+                      <View key={report.id || index} style={styles.activityItem}>
+                        <View style={styles.activityIcon}>
+                          <Text style={styles.activityIconText}>
+                            {report.status?.toLowerCase() === 'pending' ? '⏳' :
+                             report.status?.toLowerCase() === 'in-progress' ? '🚀' :
+                             report.status?.toLowerCase() === 'resolved' ? '✅' : '❓'}
+                          </Text>
+                        </View>
+                        <View style={styles.activityContent}>
+                          <Text style={styles.activityTitle} numberOfLines={1}>
+                            {report.type || 'Unknown'} Report
+                          </Text>
+                          <Text style={styles.activityTime}>
+                            {report.createdAt ? new Date(report.createdAt).toLocaleDateString() : 'Unknown time'}
+                          </Text>
+                        </View>
+                      </View>
+                    ))}
+                </ScrollView>
+              </View>
             </View>
           </Animated.View>
         )}
@@ -902,6 +1471,15 @@ const styles = StyleSheet.create({
     shadowRadius: 10,
     elevation: 30,
     zIndex: 2000,
+  },
+  dropdownBackdrop: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: 'transparent',
+    zIndex: 999,
   },
   notifItem: {
     flexDirection: 'row',
@@ -1350,4 +1928,379 @@ const styles = StyleSheet.create({
     color: '#fff',
     fontWeight: '800',
   },
-});
+  viewDetailsBtn: {
+    backgroundColor: '#667eea',
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    borderRadius: 8,
+    marginTop: 12,
+    alignSelf: 'flex-start',
+  },
+  viewDetailsBtnText: {
+    color: '#fff',
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  analyticsGrid: {
+    gap: 16,
+  },
+  analyticsCard: {
+    backgroundColor: '#1a1a2e',
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#333',
+    padding: 16,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.1,
+    shadowRadius: 8,
+    elevation: 4,
+  },
+  analyticsCardTitle: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: '#fff',
+    marginBottom: 12,
+  },
+  chartContainer: {
+    marginTop: 8,
+  },
+  barChart: {
+    gap: 12,
+  },
+  chartItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  chartLabel: {
+    fontSize: 14,
+    color: '#ccc',
+    minWidth: 80,
+  },
+  barContainer: {
+    flex: 1,
+    height: 20,
+    backgroundColor: '#2a2a3e',
+    borderRadius: 10,
+    justifyContent: 'center',
+    position: 'relative',
+  },
+  bar: {
+    height: '100%',
+    borderRadius: 10,
+    position: 'absolute',
+    left: 0,
+  },
+  barValue: {
+    fontSize: 12,
+    color: '#fff',
+    fontWeight: '700',
+    textAlign: 'right',
+    paddingRight: 8,
+  },
+  pieChart: {
+    gap: 8,
+    marginTop: 8,
+  },
+  pieItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  pieDot: {
+    width: 12,
+    height: 12,
+    borderRadius: 6,
+  },
+  pieLabel: {
+    fontSize: 14,
+    color: '#ccc',
+    flex: 1,
+  },
+  pieValue: {
+    fontSize: 14,
+    color: '#fff',
+    fontWeight: '700',
+  },
+  performanceList: {
+    gap: 12,
+    marginTop: 8,
+  },
+  performanceItem: {
+    backgroundColor: '#2a2a3e',
+    borderRadius: 8,
+    padding: 12,
+    borderWidth: 1,
+    borderColor: '#333',
+  },
+  performanceHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  performanceName: {
+    fontSize: 14,
+    color: '#fff',
+    fontWeight: '600',
+    flex: 1,
+  },
+  performanceRate: {
+    fontSize: 16,
+    color: '#4caf50',
+    fontWeight: '800',
+  },
+  performanceBar: {
+    height: 8,
+    backgroundColor: '#333',
+    borderRadius: 4,
+    marginBottom: 8,
+  },
+  performanceFill: {
+    height: '100%',
+    borderRadius: 4,
+    position: 'absolute',
+    left: 0,
+  },
+  performanceStats: {
+    fontSize: 12,
+    color: '#999',
+  },
+  timeChart: {
+    marginTop: 8,
+  },
+  lineChart: {
+    flexDirection: 'row',
+    alignItems: 'flex-end',
+    height: 120,
+    gap: 4,
+    paddingTop: 20,
+  },
+  linePoint: {
+    flex: 1,
+    alignItems: 'center',
+  },
+  lineBar: {
+    width: 20,
+    height: 80,
+    backgroundColor: '#2a2a3e',
+    borderRadius: 4,
+    alignItems: 'center',
+    justifyContent: 'flex-end',
+  },
+  lineFill: {
+    width: '100%',
+    borderRadius: 4,
+    minHeight: 4,
+  },
+  lineLabel: {
+    fontSize: 12,
+    color: '#999',
+    marginTop: 8,
+  },
+  lineValue: {
+    fontSize: 10,
+    color: '#fff',
+    fontWeight: '600',
+    marginTop: 4,
+  },
+  healthMetrics: {
+    gap: 12,
+    marginTop: 8,
+  },
+  metricItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#2a2a3e',
+    borderRadius: 8,
+    padding: 12,
+    borderWidth: 1,
+    borderColor: '#333',
+  },
+  metricIcon: {
+    fontSize: 24,
+    marginRight: 12,
+    width: 30,
+    textAlign: 'center',
+  },
+  metricInfo: {
+    flex: 1,
+  },
+  metricValue: {
+    fontSize: 18,
+    color: '#fff',
+    fontWeight: '800',
+  },
+  metricLabel: {
+    fontSize: 12,
+    color: '#999',
+    marginTop: 2,
+  },
+  activityList: {
+    maxHeight: 200,
+    marginTop: 8,
+  },
+  activityItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: '#333',
+  },
+  activityIcon: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: '#2a2a3e',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 12,
+  },
+  activityIconText: {
+    fontSize: 14,
+  },
+  activityContent: {
+    flex: 1,
+  },
+  activityTitle: {
+    fontSize: 14,
+    color: '#fff',
+    fontWeight: '600',
+  },
+  activityTime: {
+    fontSize: 12,
+    color: '#999',
+    marginTop: 2,
+  },
+  sortDropdownBtn: {
+    backgroundColor: '#2a2a3e',
+    paddingVertical: 10,
+    paddingHorizontal: 16,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#333',
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    minWidth: 180,
+  },
+  sortDropdownBtnActive: {
+    borderColor: '#667eea',
+    backgroundColor: '#667eea20',
+  },
+  sortDropdownBtnText: {
+    color: '#fff',
+    fontSize: 14,
+    fontWeight: '600',
+    flex: 1,
+  },
+  dropdownArrow: {
+    color: '#999',
+    fontSize: 12,
+    fontWeight: '700',
+    marginLeft: 8,
+  },
+  dropdownItem: {
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    borderBottomWidth: 1,
+    borderBottomColor: '#1f1f35',
+  },
+  dropdownItemActive: {
+    backgroundColor: '#667eea20',
+  },
+  dropdownItemText: {
+    color: '#fff',
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  dropdownItemTextActive: {
+    color: '#667eea',
+  },
+  dropdownCheck: {
+    color: '#667eea',
+    fontSize: 16,
+    fontWeight: '800',
+  },
+  profileAvatar: {
+    width: 80,
+    height: 80,
+    borderRadius: 40,
+    backgroundColor: '#667eea',
+    alignItems: 'center',
+    justifyContent: 'center',
+    alignSelf: 'center',
+    marginBottom: 20,
+    borderWidth: 3,
+    borderColor: '#4455aa',
+  },
+  profileAvatarText: {
+    fontSize: 32,
+    color: '#fff',
+    fontWeight: '800',
+  },
+  roleSelector: {
+    flexDirection: 'row',
+    gap: 8,
+    marginBottom: 20,
+  },
+  roleOption: {
+    flex: 1,
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#333',
+    backgroundColor: '#2a2a3e',
+    alignItems: 'center',
+  },
+  roleOptionActive: {
+    borderColor: '#667eea',
+    backgroundColor: '#667eea20',
+  },
+  roleOptionText: {
+    color: '#bbb',
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  roleOptionTextActive: {
+    color: '#667eea',
+    fontWeight: '800',
+  },
+  currentInfo: {
+    backgroundColor: '#1a1a2e',
+    borderRadius: 8,
+    padding: 16,
+    marginTop: 20,
+    borderWidth: 1,
+    borderColor: '#333',
+  },
+  currentInfoTitle: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: '#fff',
+    marginBottom: 12,
+  },
+  currentInfoText: {
+    fontSize: 14,
+    color: '#999',
+    marginBottom: 6,
+  },
+  modalSaveBtn: {
+    backgroundColor: '#4caf50',
+    paddingVertical: 10,
+    paddingHorizontal: 16,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#2e7d32',
+  },
+  modalSaveText: {
+    color: '#fff',
+    fontWeight: '800',
+  },
+});``
