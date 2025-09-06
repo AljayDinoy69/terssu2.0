@@ -11,12 +11,13 @@ import { getCurrentUser, listAssignedReports, logout, Report, updateReportStatus
 import { API_BASE_URL } from '../utils/api';
 import { listResponders } from '../utils/auth';
 import { playNotificationSound } from '../utils/sound';
-import { isSoundEnabled, setSoundEnabled } from '../utils/settings';
+import { isSoundEnabled, setSoundEnabled, getNotificationFrequency, NotificationFrequency } from '../utils/settings';
 import ProfileModal from './ProfileModal';
+import SettingsModal from '../components/SettingsModal';
 
 export type ResponderDashProps = NativeStackScreenProps<RootStackParamList, 'ResponderDashboard'>;
 
-const { width } = Dimensions.get('window');
+const { width, height } = Dimensions.get('window');
 
 // Notifications are persisted on the server
 
@@ -44,6 +45,8 @@ export default function ResponderDashboard({ navigation }: ResponderDashProps) {
   const [unseen, setUnseen] = useState(0);
   const [profileModalVisible, setProfileModalVisible] = useState(false);
   const [currentUser, setCurrentUser] = useState<any>(null);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [notificationFreq, setNotificationFreq] = useState<NotificationFrequency>('normal');
   // Map modal state
   const [mapOpen, setMapOpen] = useState(false);
   const [incidentCoord, setIncidentCoord] = useState<{ lat: number; lon: number } | null>(null);
@@ -112,7 +115,9 @@ export default function ResponderDashboard({ navigation }: ResponderDashProps) {
       prevPendingRef.current = pendingCount;
       didInitRef.current = true;
     } else if (pendingCount > prevPendingRef.current) {
-      playNotificationSound();
+      if (soundEnabled && notificationFreq !== 'off') {
+        playNotificationSound();
+      }
       prevPendingRef.current = pendingCount;
     } else {
       prevPendingRef.current = pendingCount;
@@ -157,7 +162,9 @@ export default function ResponderDashboard({ navigation }: ResponderDashProps) {
                 const report = evt.report;
                 if (report?.responderId && meRef.current?.id && report.responderId === meRef.current.id) {
                   await load();
-                  if (report.status === 'Pending') playNotificationSound();
+                  if (report.status === 'Pending' && soundEnabled && notificationFreq !== 'off') {
+                    playNotificationSound();
+                  }
                   // Refresh notifications from server so dropdown reflects new one
                   await loadNotifications();
                 }
@@ -166,8 +173,10 @@ export default function ResponderDashboard({ navigation }: ResponderDashProps) {
                 const report = evt.report;
                 if (report?.responderId && meRef.current?.id && report.responderId === meRef.current.id) {
                   await load();
-                  // Ensure updates also have sound for responder's assigned cases
-                  playNotificationSound();
+                  // Ensure updates also have sound for responder's assigned cases (respect prefs)
+                  if (soundEnabled && notificationFreq !== 'off') {
+                    playNotificationSound();
+                  }
                   await loadNotifications();
                 }
               }
@@ -227,6 +236,11 @@ export default function ResponderDashboard({ navigation }: ResponderDashProps) {
     try {
       const pref = await isSoundEnabled();
       setSoundEnabledState(pref);
+    } catch {}
+    // Load notification frequency
+    try {
+      const freq = await getNotificationFrequency();
+      setNotificationFreq(freq);
     } catch {}
     setReports([...list].sort((a, b) => Number(b?.createdAt ?? 0) - Number(a?.createdAt ?? 0)));
   };
@@ -523,21 +537,10 @@ export default function ResponderDashboard({ navigation }: ResponderDashProps) {
             </TouchableOpacity>
             <TouchableOpacity 
               style={styles.menuItem} 
-              onPress={() => { setMenuOpen(false); Alert.alert('Settings', 'Coming soon'); }}
+              onPress={() => { setMenuOpen(false); setSettingsOpen(true); }}
               activeOpacity={0.7}
             >
               <Text style={styles.menuItemText}>⚙️ Settings</Text>
-            </TouchableOpacity>
-            <TouchableOpacity 
-              style={styles.menuItem}
-              onPress={async () => {
-                const next = !soundEnabled;
-                setSoundEnabledState(next);
-                await setSoundEnabled(next);
-              }}
-              activeOpacity={0.7}
-            >
-              <Text style={styles.menuItemText}>{soundEnabled ? '🔔 Sound: On' : '🔕 Sound: Off'}</Text>
             </TouchableOpacity>
             <TouchableOpacity 
               style={styles.menuItem} 
@@ -661,7 +664,7 @@ export default function ResponderDashboard({ navigation }: ResponderDashProps) {
           <View style={styles.modalContent}>
             <Text style={styles.modalTitle}>Report Details</Text>
             {!!detailReport && (
-              <ScrollView style={{ maxHeight: 380 }} showsVerticalScrollIndicator={false}>
+              <ScrollView style={styles.modalScroll} showsVerticalScrollIndicator={false}>
                 <View style={styles.modalRow}><Text style={styles.modalLabel}>Type:</Text><Text style={styles.modalValue}>{detailReport.type}</Text></View>
                 <View style={styles.modalRow}><Text style={styles.modalLabel}>Status:</Text><Text style={styles.modalValue}>{detailReport.status}</Text></View>
                 <View style={styles.modalRow}><Text style={styles.modalLabel}>Responder:</Text><Text style={styles.modalValue}>{nameMap[detailReport.responderId] || detailReport.responderId}</Text></View>
@@ -763,6 +766,13 @@ export default function ResponderDashboard({ navigation }: ResponderDashProps) {
         onProfileUpdated={(u) => { setCurrentUser(u); }}
         onAccountDeleted={() => { setProfileModalVisible(false); }}
         navigation={navigation}
+      />
+      {/* Settings Modal */}
+      <SettingsModal
+        visible={settingsOpen}
+        onClose={() => setSettingsOpen(false)}
+        soundEnabled={soundEnabled}
+        onToggleSound={async (next) => { setSoundEnabledState(next); await setSoundEnabled(next); }}
       />
     </View>
   );
@@ -1214,7 +1224,13 @@ const styles = StyleSheet.create({
     borderColor: '#333',
     width: '100%',
     maxWidth: 520,
+    // Constrain overall modal height to keep actions visible on small screens
+    maxHeight: Math.min(height * 0.8, 720),
     padding: 16,
+  },
+  // Scroll area inside modal adapts to screen height
+  modalScroll: {
+    maxHeight: Math.min(height * 0.55, 520),
   },
   modalTitle: {
     color: '#fff',
@@ -1245,7 +1261,8 @@ const styles = StyleSheet.create({
   },
   modalImage: {
     width: '100%',
-    height: 220,
+    // Responsive image height: up to 28% of screen height, capped to keep layout tidy
+    height: Math.min(Math.max(height * 0.28, 160), 260),
     borderRadius: 10,
     marginTop: 8,
     backgroundColor: '#111',

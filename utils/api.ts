@@ -1,14 +1,39 @@
 import { Platform } from 'react-native';
+import Constants from 'expo-constants';
 
-// For local development: prefer EXPO_PUBLIC_API_URL, fallback to localhost
+// Resolve API base URL to work on emulators AND real devices.
+// Order of precedence:
+// 1) EXPO_PUBLIC_API_URL (recommended)
+// 2) Expo hostUri-derived LAN IP + port 4000 (dev convenience)
+// 3) Defaults: Android emulator 10.0.2.2, iOS simulator/others localhost
 function resolveBaseUrl() {
-  const raw = process.env.EXPO_PUBLIC_API_URL || 'http://localhost:4000';
-  // On Android emulator, 'localhost' and '127.0.0.1' refer to the emulator, not the dev machine.
-  if (Platform.OS === 'android') {
-    if (raw.includes('localhost')) return raw.replace('localhost', '10.0.2.2');
-    if (raw.includes('127.0.0.1')) return raw.replace('127.0.0.1', '10.0.2.2');
+  const envUrl = (process.env.EXPO_PUBLIC_API_URL || '').trim();
+  let base = envUrl;
+
+  if (!base) {
+    const anyConstants = Constants as any;
+    const hostUri = anyConstants?.expoConfig?.hostUri || anyConstants?.manifest2?.extra?.hostUri || anyConstants?.manifest?.hostUri || '';
+    if (hostUri) {
+      // hostUri like "192.168.1.5:19000" or "localhost:19000"
+      const host = String(hostUri).split(':')[0];
+      const resolvedHost = (Platform.OS === 'android' && (host === 'localhost' || host === '127.0.0.1')) ? '10.0.2.2' : host;
+      base = `http://${resolvedHost}:4000`;
+    }
   }
-  return raw;
+
+  if (!base) {
+    // Final fallbacks
+    base = Platform.OS === 'android' ? 'http://10.0.2.2:4000' : 'http://localhost:4000';
+  }
+
+  // Ensure Android emulator localhost mapping if someone hardcoded localhost
+  if (Platform.OS === 'android') {
+    base = base.replace('localhost', '10.0.2.2').replace('127.0.0.1', '10.0.2.2');
+  }
+
+  // Normalize: remove trailing slash
+  base = base.replace(/\/$/, '');
+  return base;
 }
 
 export const API_BASE_URL = resolveBaseUrl();
@@ -40,7 +65,7 @@ async function request<T = any>(path: string, options: RequestInit = {}): Promis
     return data as T;
   } catch (err: any) {
     if (err?.name === 'AbortError') {
-      throw new Error('Network timeout. Please check your API URL and connectivity.');
+      throw new Error(`Network timeout. Cannot reach ${API_BASE_URL}. Please check your API URL and connectivity.`);
     }
     throw err;
   } finally {

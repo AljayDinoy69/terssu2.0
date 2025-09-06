@@ -6,8 +6,9 @@ import { RootStackParamList } from '../navigation/AppNavigator';
 import { getCurrentUser, listReportsByUser, logout, Report, listNotifications, markNotificationRead, deleteNotification, markAllNotificationsRead, Notification as NotificationItem } from '../utils/auth';
 import { API_BASE_URL } from '../utils/api';
 import { playNotificationSound } from '../utils/sound';
-import { isSoundEnabled, setSoundEnabled } from '../utils/settings';
+import { isSoundEnabled, setSoundEnabled, getNotificationFrequency, NotificationFrequency } from '../utils/settings';
 import ProfileModal from './ProfileModal';
+import SettingsModal from '../components/SettingsModal';
 
 export type UserDashProps = NativeStackScreenProps<RootStackParamList, 'UserDashboard'>;
 
@@ -29,6 +30,8 @@ export default function UserDashboard({ navigation }: UserDashProps) {
   const sseActiveRef = useRef<boolean>(false);
   const [profileModalVisible, setProfileModalVisible] = useState(false);
   const [currentUser, setCurrentUser] = useState<any>(null);
+  const [notificationFreq, setNotificationFreq] = useState<NotificationFrequency>('normal');
+  const [settingsOpen, setSettingsOpen] = useState(false);
 
   // Animation values
   const fadeAnim = useRef(new Animated.Value(0)).current;
@@ -85,7 +88,9 @@ export default function UserDashboard({ navigation }: UserDashProps) {
       prevPendingRef.current = pendingCount;
       didInitRef.current = true;
     } else if (pendingCount > prevPendingRef.current) {
-      playNotificationSound();
+      if (soundEnabled && notificationFreq !== 'off') {
+        playNotificationSound();
+      }
       prevPendingRef.current = pendingCount;
     } else {
       prevPendingRef.current = pendingCount;
@@ -129,11 +134,15 @@ export default function UserDashboard({ navigation }: UserDashProps) {
                 await load();
                 await loadNotifications();
                 if (evt.type === 'report:new') {
-                  playNotificationSound();
+                  if (soundEnabled && notificationFreq !== 'off') {
+                    playNotificationSound();
+                  }
                 } else if (evt.type === 'report:update') {
                   // If this update concerns the logged-in user's report, play a sound
                   if (evt.report && String(evt.report.userId || '') === String(me.id)) {
-                    playNotificationSound();
+                    if (soundEnabled && notificationFreq !== 'off') {
+                      playNotificationSound();
+                    }
                   }
                 }
               }
@@ -149,7 +158,9 @@ export default function UserDashboard({ navigation }: UserDashProps) {
               const unread = await loadNotifications();
               if (typeof unread === 'number') {
                 if (unread > prevUnread) {
-                  playNotificationSound();
+                  if (soundEnabled && notificationFreq !== 'off') {
+                    playNotificationSound();
+                  }
                 }
                 prevUnread = unread;
               }
@@ -162,7 +173,9 @@ export default function UserDashboard({ navigation }: UserDashProps) {
             const unread = await loadNotifications();
             if (typeof unread === 'number') {
               if (unread > prevUnread) {
-                playNotificationSound();
+                if (soundEnabled && notificationFreq !== 'off') {
+                  playNotificationSound();
+                }
               }
               prevUnread = unread;
             }
@@ -175,7 +188,9 @@ export default function UserDashboard({ navigation }: UserDashProps) {
           const unread = await loadNotifications();
           if (typeof unread === 'number') {
             if (unread > prevUnread) {
-              playNotificationSound();
+              if (soundEnabled && notificationFreq !== 'off') {
+                playNotificationSound();
+              }
             }
             prevUnread = unread;
           }
@@ -208,6 +223,11 @@ export default function UserDashboard({ navigation }: UserDashProps) {
     try {
       const pref = await isSoundEnabled();
       setSoundEnabledState(pref);
+    } catch {}
+    // Load notification frequency
+    try {
+      const freq = await getNotificationFrequency();
+      setNotificationFreq(freq);
     } catch {}
     setReports([...list].sort((a, b) => Number(b?.createdAt ?? 0) - Number(a?.createdAt ?? 0)));
   };
@@ -501,21 +521,10 @@ setProfileModalVisible(false);
             </TouchableOpacity>
             <TouchableOpacity 
               style={styles.menuItem} 
-              onPress={() => { setMenuOpen(false); Alert.alert('Settings', 'Coming soon'); }}
+              onPress={() => { setMenuOpen(false); setSettingsOpen(true); }}
               activeOpacity={0.7}
             >
               <Text style={styles.menuItemText}>⚙️ Settings</Text>
-            </TouchableOpacity>
-            <TouchableOpacity 
-              style={styles.menuItem}
-              onPress={async () => {
-                const next = !soundEnabled;
-                setSoundEnabledState(next);
-                await setSoundEnabled(next);
-              }}
-              activeOpacity={0.7}
-            >
-              <Text style={styles.menuItemText}>{soundEnabled ? '🔔 Sound: On' : '🔕 Sound: Off'}</Text>
             </TouchableOpacity>
             <TouchableOpacity 
               style={styles.menuItem} 
@@ -671,6 +680,13 @@ setProfileModalVisible(false);
         onProfileUpdated={handleProfileUpdated}
         onAccountDeleted={handleAccountDeleted}
         navigation={navigation}
+      />
+      {/* Settings Modal */}
+      <SettingsModal
+        visible={settingsOpen}
+        onClose={() => setSettingsOpen(false)}
+        soundEnabled={soundEnabled}
+        onToggleSound={async (next) => { setSoundEnabledState(next); await setSoundEnabled(next); }}
       />
     </View>
   );

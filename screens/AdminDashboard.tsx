@@ -5,8 +5,9 @@ import { RootStackParamList } from '../navigation/AppNavigator';
 import { createResponder, deleteAccount, getCurrentUser, listAllReports, listUsers, logout, listNotifications, markNotificationRead, deleteNotification, markAllNotificationsRead, Notification as NotificationItem } from '../utils/auth';
 import { API_BASE_URL } from '../utils/api';
 import { playNotificationSound } from '../utils/sound';
-import { isSoundEnabled, setSoundEnabled } from '../utils/settings';
+import { isSoundEnabled, setSoundEnabled, getNotificationFrequency, NotificationFrequency } from '../utils/settings';
 import ProfileModal from './ProfileModal';
+import SettingsModal from '../components/SettingsModal';
 
 export type AdminDashProps = NativeStackScreenProps<RootStackParamList, 'AdminDashboard'>;
 
@@ -46,6 +47,8 @@ export default function AdminDashboard({ navigation }: AdminDashProps) {
   });
   const [profileModalVisible, setProfileModalVisible] = useState(false);
   const [currentUser, setCurrentUser] = useState<any>(null);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [notificationFreq, setNotificationFreq] = useState<NotificationFrequency>('normal');
 
   // Animation values
   const fadeAnim = useRef(new Animated.Value(0)).current;
@@ -113,8 +116,10 @@ export default function AdminDashboard({ navigation }: AdminDashProps) {
       prevPendingRef.current = pendingCount;
       didInitRef.current = true;
     } else if (pendingCount > prevPendingRef.current) {
-      // New pending reports detected -> play notification sound
-      playNotificationSound();
+      // New pending reports detected -> play notification sound (respect preferences)
+      if (soundEnabled && notificationFreq !== 'off') {
+        playNotificationSound();
+      }
       prevPendingRef.current = pendingCount;
     } else {
       prevPendingRef.current = pendingCount;
@@ -156,12 +161,16 @@ export default function AdminDashboard({ navigation }: AdminDashProps) {
               if (!evt || !evt.type) return;
               if (evt.type === 'report:new') {
                 await load();
-                playNotificationSound();
+                if (soundEnabled && notificationFreq !== 'off') {
+                  playNotificationSound();
+                }
                 await loadNotifications();
               } else if (evt.type === 'report:update') {
                 await load();
-                // Ensure updates also have sound
-                playNotificationSound();
+                // Ensure updates also have sound (respect preferences)
+                if (soundEnabled && notificationFreq !== 'off') {
+                  playNotificationSound();
+                }
                 await loadNotifications();
               }
             } catch {}
@@ -214,6 +223,11 @@ export default function AdminDashboard({ navigation }: AdminDashProps) {
     try {
       const pref = await isSoundEnabled();
       setSoundEnabledState(pref);
+    } catch {}
+    // Load notification frequency
+    try {
+      const freq = await getNotificationFrequency();
+      setNotificationFreq(freq);
     } catch {}
     setUsers(await listUsers());
     const all = await listAllReports();
@@ -576,18 +590,8 @@ return (
             <TouchableOpacity style={styles.menuItem} onPress={openProfileEdit}>
               <Text style={styles.menuItemText}>👤 Profile</Text>
             </TouchableOpacity>
-            <TouchableOpacity style={styles.menuItem} onPress={() => { setMenuOpen(false); Alert.alert('Settings', 'Coming soon'); }}>
+            <TouchableOpacity style={styles.menuItem} onPress={() => { setMenuOpen(false); setSettingsOpen(true); }}>
               <Text style={styles.menuItemText}>⚙️ Settings</Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={styles.menuItem}
-              onPress={async () => {
-                const next = !soundEnabled;
-                setSoundEnabledState(next);
-                await setSoundEnabled(next);
-              }}
-            >
-              <Text style={styles.menuItemText}>{soundEnabled ? '🔔 Sound: On' : '🔕 Sound: Off'}</Text>
             </TouchableOpacity>
             <TouchableOpacity style={styles.menuItem} onPress={() => { setMenuOpen(false); Alert.alert('About & Services', 'Coming soon'); }}>
               <Text style={styles.menuItemText}>ℹ️ About & Services</Text>
@@ -681,6 +685,14 @@ return (
         onProfileUpdated={(u) => { setCurrentUser(u); setProfileModalVisible(false); }}
         onAccountDeleted={() => { setProfileModalVisible(false); }}
         navigation={navigation}
+      />
+
+      {/* Settings Modal */}
+      <SettingsModal
+        visible={settingsOpen}
+        onClose={() => setSettingsOpen(false)}
+        soundEnabled={soundEnabled}
+        onToggleSound={async (next) => { setSoundEnabledState(next); await setSoundEnabled(next); }}
       />
 
             {/* Action Buttons */}
