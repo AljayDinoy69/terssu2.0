@@ -9,6 +9,7 @@ import UserDashboard from '../screens/UserDashboard';
 import ResponderDashboard from '../screens/ResponderDashboard';
 import AdminDashboard from '../screens/AdminDashboard';
 import AdminCreateUsers from '../components/AdminCreateUsers';
+import { useTheme } from '../components/ThemeProvider';
 
 export type RootStackParamList = {
   Home: undefined;
@@ -24,9 +25,18 @@ export type RootStackParamList = {
 const Stack = createNativeStackNavigator<RootStackParamList>();
 
 export default function AppNavigator() {
+  const { colors } = useTheme();
   return (
     <NavigationContainer theme={DefaultTheme}>
-      <Stack.Navigator initialRouteName="Home">
+      <Stack.Navigator
+        initialRouteName="Home"
+        screenOptions={{
+          headerStyle: { backgroundColor: colors.background },
+          headerTintColor: colors.text,
+          headerTitleStyle: { color: colors.text },
+          contentStyle: { backgroundColor: colors.background },
+        }}
+      >
         <Stack.Screen name="Home" component={HomeScreen} options={{ headerShown: false }} />
         <Stack.Screen name="Login" component={LoginScreen} />
         <Stack.Screen name="Signup" component={SignupScreen} />

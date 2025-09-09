@@ -8,12 +8,14 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { getCurrentUser, listNotifications, markNotificationRead } from '../utils/auth';
 import { playNotificationSound } from '../utils/sound';
 import { API_BASE_URL } from '../utils/api';
+import { useTheme } from '../components/ThemeProvider';
 
 export type HomeProps = NativeStackScreenProps<RootStackParamList, 'Home'>;
 
 // removed unused width
 
 export default function HomeScreen({ navigation }: HomeProps) {
+  const { colors } = useTheme();
   // Animation values
   const fadeAnim = useRef(new Animated.Value(0)).current;
   const slideAnim = useRef(new Animated.Value(50)).current;
@@ -372,8 +374,8 @@ export default function HomeScreen({ navigation }: HomeProps) {
             transform: [{ translateY: slideAnim }],
           }}
         >
-          <Text style={styles.title}>ERS</Text>
-          <Text style={styles.subtitle}>Emergency Response System</Text>
+          <Text style={[styles.title, { color: colors.text }]}>ERS</Text>
+          <Text style={[styles.subtitle, { color: colors.text, opacity: 0.85 }]}>Emergency Response System</Text>
         </Animated.View>
         
         {/* Animated logo */}
@@ -404,7 +406,7 @@ export default function HomeScreen({ navigation }: HomeProps) {
             transform: [{ translateY: slideAnim }],
           }}
         >
-        <Text style={styles.subtitle1}>Direct Report Here!</Text>
+        <Text style={[styles.subtitle1, { color: colors.text, opacity: 0.85 }]}>Direct Report Here!</Text>
         </Animated.View>
 
         {/* Animated buttons */}
@@ -429,7 +431,7 @@ export default function HomeScreen({ navigation }: HomeProps) {
               activeOpacity={0.8}
             >
               <View style={styles.buttonContent}>
-                <Text style={styles.btnText}>✨ Signup</Text>
+                <Text style={[styles.btnText, { color: colors.text }]}>✨ Signup</Text>
                 <View style={styles.buttonHighlight} pointerEvents="none" />
               </View>
             </TouchableOpacity>
@@ -437,27 +439,27 @@ export default function HomeScreen({ navigation }: HomeProps) {
         </View>
         {/* Info Cards */}
         <View style={styles.infoCards}>
-          <View style={[styles.infoCard, styles.cardShadow]}>
+          <View style={[styles.infoCard, styles.cardShadow]}> 
             <Text style={styles.infoIcon}>🕒</Text>
             <View style={styles.infoTextWrap}>
-              <Text style={styles.infoTitle}>24/7 Availability</Text>
-              <Text style={styles.infoDesc}>Report incidents anytime, anywhere with reliable uptime.</Text>
+              <Text style={[styles.infoTitle, { color: colors.text }]}>24/7 Availability</Text>
+              <Text style={[styles.infoDesc, { color: colors.text + '99' }]}>Report incidents anytime, anywhere with reliable uptime.</Text>
             </View>
           </View>
 
           <View style={[styles.infoCard, styles.cardShadow]}>
             <Text style={styles.infoIcon}>📍</Text>
             <View style={styles.infoTextWrap}>
-              <Text style={styles.infoTitle}>Accurate Geolocation</Text>
-              <Text style={styles.infoDesc}>Share precise location to speed up emergency response.</Text>
+              <Text style={[styles.infoTitle, { color: colors.text }]}>Accurate Geolocation</Text>
+              <Text style={[styles.infoDesc, { color: colors.text + '99' }]}>Share precise location to speed up emergency response.</Text>
             </View>
           </View>
 
           <View style={[styles.infoCard, styles.cardShadow]}>
             <Text style={styles.infoIcon}>🔒</Text>
             <View style={styles.infoTextWrap}>
-              <Text style={styles.infoTitle}>Privacy First</Text>
-              <Text style={styles.infoDesc}>Report anonymously or securely with your account.</Text>
+              <Text style={[styles.infoTitle, { color: colors.text }]}>Privacy First</Text>
+              <Text style={[styles.infoDesc, { color: colors.text + '99' }]}>Report anonymously or securely with your account.</Text>
             </View>
           </View>
         </View>
@@ -480,7 +482,7 @@ export default function HomeScreen({ navigation }: HomeProps) {
             <View style={styles.modalContentWrapper}>
               <View style={styles.notificationModal}>
                 <View style={styles.modalHeader}>
-                  <Text style={styles.modalTitle}>Notifications</Text>
+                  <Text style={[styles.modalTitle, { color: colors.text }]}>Notifications</Text>
                   <TouchableOpacity
                     onPress={toggleNotificationModal}
                     style={styles.closeButton}
@@ -502,9 +504,9 @@ export default function HomeScreen({ navigation }: HomeProps) {
                             onPress={() => markNotificationAsRead(item.id)}
                           >
                             <View style={styles.notificationContent}>
-                              <Text style={styles.notificationTitle}>{item.title}</Text>
-                              <Text style={styles.notificationMessage}>{item.title}</Text>
-                              <Text style={styles.notificationTimestamp}>
+                              <Text style={[styles.notificationTitle, { color: colors.text }]}>{item.title}</Text>
+                              <Text style={[styles.notificationMessage, { color: colors.text + '99' }]}>{item.title}</Text>
+                              <Text style={[styles.notificationTimestamp, { color: colors.text + '66' }]}>
                                 {new Date(item.createdAt || item.timestamp).toLocaleDateString()} at{' '}
                                 {new Date(item.createdAt || item.timestamp).toLocaleTimeString()}
                               </Text>
@@ -517,14 +519,14 @@ export default function HomeScreen({ navigation }: HomeProps) {
 
                           {isExpanded && (
                             <View style={styles.expandedNotification}>
-                              <Text style={styles.expandedDetails}>
+                              <Text style={[styles.expandedDetails, { color: colors.text }]}>
                                 {item.reportId ? `Report ID: ${item.reportId}` : 'System notification'}
                               </Text>
                               <View style={styles.expandedFooter}>
-                                <Text style={styles.expandedTimestamp}>
+                                <Text style={[styles.expandedTimestamp, { color: colors.text + '66' }]}>
                                   Received: {new Date(item.createdAt || item.timestamp).toLocaleString()}
                                 </Text>
-                                <Text style={styles.readStatus}>
+                                <Text style={[styles.readStatus, { color: colors.text }]}>
                                   Status: {item.read ? 'Read' : 'Unread'}
                                 </Text>
                               </View>

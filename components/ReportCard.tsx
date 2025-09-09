@@ -1,6 +1,7 @@
-import React from 'react';
+import React, { useMemo } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, Image } from 'react-native';
 import { Report } from '../utils/auth';
+import { useTheme } from './ThemeProvider';
 
 interface ReportCardProps {
   item: Report;
@@ -10,14 +11,29 @@ interface ReportCardProps {
 }
 
 export const ReportCard: React.FC<ReportCardProps> = ({ item, index, nameMap, onPress }) => {
+  const { colors } = useTheme();
+  const themed = useMemo(() => StyleSheet.create({
+    card: {
+      backgroundColor: colors.background,
+      borderColor: colors.text + '22',
+    },
+    title: { color: colors.text },
+    desc: { color: colors.text + 'bb' },
+    meta: { color: colors.text + '99' },
+    viewBtn: { borderColor: colors.text + '22' },
+    viewBtnText: { color: colors.text },
+    thumbBorder: { borderColor: colors.text + '22', backgroundColor: colors.background },
+    detailsBorder: { borderTopColor: colors.text + '22' },
+  }), [colors]);
+
   return (
     <TouchableOpacity
-      style={styles.card}
+      style={[styles.card, themed.card]}
       onPress={onPress}
       activeOpacity={0.85}
     >
       <View style={styles.cardHeader}>
-        <Text style={styles.cardTitle}>{item.type}</Text>
+        <Text style={[styles.cardTitle, themed.title]}>{item.type}</Text>
         <View style={[styles.statusBadge, {
           backgroundColor: item.status === 'Pending' ? '#ff9800' :
                           item.status === 'In-progress' ? '#2196f3' :
@@ -32,12 +48,12 @@ export const ReportCard: React.FC<ReportCardProps> = ({ item, index, nameMap, on
       </View>
 
       {!!item.chiefComplaint && (
-        <Text style={styles.cardDesc} numberOfLines={2} ellipsizeMode="tail">
+        <Text style={[styles.cardDesc, themed.desc]} numberOfLines={2} ellipsizeMode="tail">
           🆘 Chief Complaint: {item.chiefComplaint}
         </Text>
       )}
       {!!item.description && (
-        <Text style={styles.cardDesc} numberOfLines={3} ellipsizeMode="tail">
+        <Text style={[styles.cardDesc, themed.desc]} numberOfLines={3} ellipsizeMode="tail">
           📝 {item.description}
         </Text>
       )}
@@ -46,45 +62,45 @@ export const ReportCard: React.FC<ReportCardProps> = ({ item, index, nameMap, on
       {(item.photoUrl || item.photoUri) ? (
         <Image
           source={{ uri: item.photoUrl || item.photoUri }}
-          style={styles.thumbnail}
+          style={[styles.thumbnail, themed.thumbBorder]}
           resizeMode="cover"
         />
       ) : null}
 
-      <View style={styles.reportDetails}>
+      <View style={[styles.reportDetails, themed.detailsBorder]}>
         {!!item.fullName && (
-          <Text style={styles.meta} numberOfLines={1} ellipsizeMode="tail">
+          <Text style={[styles.meta, themed.meta]} numberOfLines={1} ellipsizeMode="tail">
             🙋 Full Name: {item.fullName}
           </Text>
         )}
         {!!item.contactNo && (
-          <Text style={styles.meta} numberOfLines={1} ellipsizeMode="tail">
+          <Text style={[styles.meta, themed.meta]} numberOfLines={1} ellipsizeMode="tail">
             📞 Contact: {item.contactNo}
           </Text>
         )}
         {!!item.personsInvolved && (
-          <Text style={styles.meta} numberOfLines={1} ellipsizeMode="tail">
+          <Text style={[styles.meta, themed.meta]} numberOfLines={1} ellipsizeMode="tail">
             👥 Persons Involved: {item.personsInvolved}
           </Text>
         )}
-        <Text style={styles.meta} numberOfLines={1} ellipsizeMode="tail">
+        <Text style={[styles.meta, themed.meta]} numberOfLines={1} ellipsizeMode="tail">
           👨‍🚒 Responder: {item.responderId}
         </Text>
-        <Text style={styles.meta} numberOfLines={1} ellipsizeMode="middle">
+        <Text style={[styles.meta, themed.meta]} numberOfLines={1} ellipsizeMode="middle">
           👤 From: {item.fullName || (item.userId ? (nameMap?.[item.userId] || 'Reporter') : 'Anonymous')}
         </Text>
-        <Text style={styles.meta}>
+        <Text style={[styles.meta, themed.meta]}>
           📅 Created: {new Date(item.createdAt).toLocaleString()}
         </Text>
       </View>
 
       <View style={styles.cardActions}>
         <TouchableOpacity
-          style={styles.viewBtn}
+          style={[styles.viewBtn, themed.viewBtn]}
           onPress={onPress}
           activeOpacity={0.85}
         >
-          <Text style={styles.viewBtnText}>👁️ View Details</Text>
+          <Text style={[styles.viewBtnText, themed.viewBtnText]}>👁️ View Details</Text>
         </TouchableOpacity>
       </View>
     </TouchableOpacity>

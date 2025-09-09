@@ -8,6 +8,7 @@ import { playNotificationSound } from '../utils/sound';
 import { isSoundEnabled, setSoundEnabled, getNotificationFrequency, NotificationFrequency } from '../utils/settings';
 import ProfileModal from './ProfileModal';
 import SettingsModal from '../components/SettingsModal';
+import { useTheme } from '../components/ThemeProvider';
 
 export type AdminDashProps = NativeStackScreenProps<RootStackParamList, 'AdminDashboard'>;
 
@@ -16,6 +17,7 @@ export type AdminDashProps = NativeStackScreenProps<RootStackParamList, 'AdminDa
 const { width } = Dimensions.get('window');
 
 export default function AdminDashboard({ navigation }: AdminDashProps) {
+  const { colors } = useTheme();
   const [users, setUsers] = useState<any[]>([]);
   const [reports, setReports] = useState<any[]>([]);
   const [form, setForm] = useState({ name: '', email: '', phone: '', password: 'responder123' });
@@ -479,15 +481,15 @@ const renderReportCard = ({ item }: { item: any; index: number }) => (
 );
 
 return (
-  <View style={styles.container}>
+  <View style={[styles.container, { backgroundColor: colors.background }]}>
     <View style={styles.backgroundPattern} />
     {/* Header */}
     <Animated.View style={[styles.header, { transform: [{ scale: headerScale }] }]}> 
       <View style={styles.headerContent}>
-        <Text style={styles.title}>⚡ Admin Dashboard</Text>
-        <Text style={styles.subtitle}>Emergency Response Control</Text>
+        <Text style={[styles.title, { color: colors.text }]}>⚡ Admin Dashboard</Text>
+        <Text style={[styles.subtitle, { color: colors.text, opacity: 0.8 }]}>Emergency Response Control</Text>
         {/* Debug: show avatar URL used */}
-        <Text style={styles.debugUrl} numberOfLines={1}>{String(currentUser?.avatarUrl || currentUser?.photoUrl || '')}</Text>
+        <Text style={[styles.debugUrl, { color: colors.text }]} numberOfLines={1}>{String(currentUser?.avatarUrl || currentUser?.photoUrl || '')}</Text>
       </View>
       <View style={styles.headerActions}>
         <View style={{ position: 'relative' }}>
@@ -496,7 +498,7 @@ return (
             onPress={() => { setNotifOpen(o => !o); }}
             activeOpacity={0.8}
           >
-            <Text style={styles.bellIcon}>🔔</Text>
+            <Text style={[styles.bellIcon, { color: colors.text }]}>🔔</Text>
             {unseen > 0 && (
               <View style={styles.badge}><Text style={styles.badgeText}>{unseen}</Text></View>
             )}
@@ -504,70 +506,86 @@ return (
           {notifOpen && (
             <View style={[styles.dropdown, { maxHeight: 360 }]}>  
               {notifs.length === 0 ? (
-                <Text style={styles.emptyText}>No notifications yet</Text>
+                <Text style={[styles.emptyText, { color: colors.text + '99' }]}>No notifications yet</Text>
               ) : (
                 <>
                   <View style={{ paddingHorizontal: 12, paddingBottom: 6, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
-                    <Text style={{ color: '#a0a0a0', fontWeight: '700' }}>Notifications</Text>
+                    <Text style={{ color: colors.text + '99', fontWeight: '700' }}>Notifications</Text>
                     {unseen > 0 && (
-                      <TouchableOpacity onPress={async () => {
-                        try {
-                          const me = await getCurrentUser(); if (!me) return;
-                          await markAllNotificationsRead(me.id);
-                          setNotifs(prev => prev.map(x => ({ ...x, read: true })));
-                          unseenRef.current = 0; setUnseen(0);
-                        } catch {}
-                      }} activeOpacity={0.8}>
+                      <TouchableOpacity 
+                        onPress={async () => {
+                          try {
+                            const me = await getCurrentUser(); if (!me) return;
+                            await markAllNotificationsRead(me.id);
+                            setNotifs(prev => prev.map(x => ({ ...x, read: true })));
+                            unseenRef.current = 0; setUnseen(0);
+                          } catch {}
+                        }}
+                        activeOpacity={0.8}
+                      >
                         <Text style={{ color: '#66d9ef', fontWeight: '800' }}>Mark all as read</Text>
                       </TouchableOpacity>
                     )}
                   </View>
-                  <ScrollView style={{ maxHeight: 300 }} contentContainerStyle={{ paddingBottom: 8 }} showsVerticalScrollIndicator keyboardShouldPersistTaps="handled">
-                  {notifs.map(n => (
-                    <TouchableOpacity key={n.id} style={[styles.notifItem, { opacity: n.read ? 0.7 : 1 }]} onPress={async () => {
-                      // Load report and open modal
-                      if (n.reportId) {
-                        const rep = reports.find(r => String(r.id) === String(n.reportId));
-                        if (rep) setDetailReport(rep);
-                        else {
-                          const all = await listAllReports();
-                          const found = all.find(r => String(r.id) === String(n.reportId)) || null;
-                          if (found) setDetailReport(found);
-                        }
-                      }
-                      try {
-                        if (!n.read) {
-                          await markNotificationRead(n.id, true);
-                          setNotifs(prev => prev.map(x => x.id === n.id ? { ...x, read: true } : x));
-                          if (unseenRef.current > 0) { unseenRef.current -= 1; setUnseen(unseenRef.current); }
-                        }
-                      } catch {}
-                      setNotifOpen(false);
-                    }} activeOpacity={0.85}>
-                      <Text style={[styles.notifDot, { color: n.kind === 'new' ? '#ffd166' : '#66d9ef' }]}>•</Text>
-                      <View style={{ flex: 1 }}>
-                        <Text style={[styles.notifTitle, { fontWeight: n.read ? '600' : '800' }]}>{n.title}</Text>
-                        <Text style={styles.notifTime}>{n.createdAt ? new Date(n.createdAt as any).toLocaleTimeString() : ''}</Text>
-                      </View>
-                      <TouchableOpacity onPress={async () => {
-                        try {
-                          const next = !n.read; await markNotificationRead(n.id, next);
-                          setNotifs(prev => prev.map(x => x.id === n.id ? { ...x, read: next } : x));
-                          unseenRef.current = Math.max(0, unseenRef.current + (next ? -1 : 1));
-                          setUnseen(unseenRef.current);
-                        } catch {}
-                      }} style={{ paddingHorizontal: 8, paddingVertical: 4 }} activeOpacity={0.7}>
-                        <Text style={{ color: '#ffd166', fontWeight: '800' }}>{n.read ? 'Unread' : 'Read'}</Text>
-                      </TouchableOpacity>
-                      <TouchableOpacity onPress={async () => {
-                        try {
-                          await deleteNotification(n.id);
-                          setNotifs(prev => prev.filter(x => x.id !== n.id));
-                          if (!n.read && unseenRef.current > 0) { unseenRef.current -= 1; setUnseen(unseenRef.current); }
-                        } catch {}
-                      }} style={{ paddingHorizontal: 8, paddingVertical: 4 }} activeOpacity={0.7}>
-                        <Text style={{ color: '#d90429', fontWeight: '800' }}>Delete</Text>
-                      </TouchableOpacity>
+                  <ScrollView style={{ maxHeight: 300 }} contentContainerStyle={{ paddingBottom: 8 }} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
+                    {notifs.map(n => (
+                      <TouchableOpacity
+                        key={n.id}
+                        style={[styles.notifItem, { opacity: n.read ? 0.7 : 1 }]}
+                        onPress={async () => {
+                          // Load report and open modal
+                          if (n.reportId) {
+                            const rep = reports.find(r => String(r.id) === String(n.reportId));
+                            if (rep) setDetailReport(rep);
+                            else {
+                              const all = await listAllReports();
+                              const found = all.find(r => String(r.id) === String(n.reportId)) || null;
+                              if (found) setDetailReport(found);
+                            }
+                          }
+                          try {
+                            if (!n.read) {
+                              await markNotificationRead(n.id, true);
+                              setNotifs(prev => prev.map(x => x.id === n.id ? { ...x, read: true } : x));
+                              if (unseenRef.current > 0) { unseenRef.current -= 1; setUnseen(unseenRef.current); }
+                            }
+                          } catch {}
+                          setNotifOpen(false);
+                        }}
+                        activeOpacity={0.85}
+                      >
+                        <Text style={[styles.notifDot, { color: n.kind === 'new' ? '#ffd166' : '#66d9ef' }]}>•</Text>
+                        <View style={{ flex: 1 }}>
+                          <Text style={[styles.notifTitle, { color: colors.text, fontWeight: n.read ? '600' : '800' }]}>{n.title}</Text>
+                          <Text style={[styles.notifTime, { color: colors.text + '66' }]}>{n.createdAt ? new Date(n.createdAt as any).toLocaleTimeString() : ''}</Text>
+                        </View>
+                        <TouchableOpacity
+                          onPress={async () => {
+                            try {
+                              const next = !n.read; await markNotificationRead(n.id, next);
+                              setNotifs(prev => prev.map(x => x.id === n.id ? { ...x, read: next } : x));
+                              unseenRef.current = Math.max(0, unseenRef.current + (next ? -1 : 1));
+                              setUnseen(unseenRef.current);
+                            } catch {}
+                          }}
+                          style={{ paddingHorizontal: 8, paddingVertical: 4 }}
+                          activeOpacity={0.7}
+                        >
+                          <Text style={{ color: '#ffd166', fontWeight: '800' }}>{n.read ? 'Unread' : 'Read'}</Text>
+                        </TouchableOpacity>
+                        <TouchableOpacity
+                          onPress={async () => {
+                            try {
+                              await deleteNotification(n.id);
+                              setNotifs(prev => prev.filter(x => x.id !== n.id));
+                              if (!n.read && unseenRef.current > 0) { unseenRef.current -= 1; setUnseen(unseenRef.current); }
+                            } catch {}
+                          }}
+                          style={{ paddingHorizontal: 8, paddingVertical: 4 }}
+                          activeOpacity={0.7}
+                        >
+                          <Text style={{ color: '#d90429', fontWeight: '800' }}>Delete</Text>
+                        </TouchableOpacity>
                       </TouchableOpacity>
                     ))}
                   </ScrollView>
@@ -575,11 +593,11 @@ return (
               )}
             </View>
           )}
-          </View>
-          <TouchableOpacity style={styles.menuBtn} onPress={() => setMenuOpen(v => !v)} activeOpacity={0.8}>
-            <Text style={styles.menuBtnText}>☰</Text>
-          </TouchableOpacity>
         </View>
+        <TouchableOpacity style={styles.menuBtn} onPress={() => setMenuOpen(v => !v)} activeOpacity={0.8}>
+          <Text style={[styles.menuBtnText, { color: colors.text }]}>☰</Text>
+        </TouchableOpacity>
+      </View>
       </Animated.View>
 
       {/* Menu Overlay */}

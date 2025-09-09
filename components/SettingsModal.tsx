@@ -11,7 +11,7 @@ export type SettingsModalProps = {
 };
 
 export default function SettingsModal({ visible, onClose, soundEnabled, onToggleSound }: SettingsModalProps) {
-  const { setMode } = useTheme();
+  const { setMode, colors } = useTheme();
   const [theme, setTheme] = useState<AppTheme>('system');
   const [notifFreq, setNotifFreq] = useState<NotificationFrequency>('normal');
 
@@ -52,29 +52,29 @@ export default function SettingsModal({ visible, onClose, soundEnabled, onToggle
   return (
     <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
       <View style={styles.modalOverlay}>
-        <View style={styles.modalContent}>
-          <Text style={styles.modalTitle}>⚙️ Settings</Text>
+        <View style={[styles.modalContent, { backgroundColor: colors.background, borderColor: colors.text + '22' }]}>
+          <Text style={[styles.modalTitle, { color: colors.text }]}>⚙️ Settings</Text>
 
           {/* Notification Sound */}
           <View style={styles.row}>
             <View style={styles.rowTextWrap}>
-              <Text style={styles.rowTitle}>Notification Sound</Text>
-              <Text style={styles.rowSub}>Play a sound when new activity arrives</Text>
+              <Text style={[styles.rowTitle, { color: colors.text }]}>Notification Sound</Text>
+              <Text style={[styles.rowSub, { color: colors.text + '99' }]}>Play a sound when new activity arrives</Text>
             </View>
             <Switch
               value={soundEnabled}
               onValueChange={(v) => onToggleSound(v)}
-              trackColor={{ false: '#333', true: '#667eea' }}
+              trackColor={{ false: '#999', true: '#667eea' }}
               thumbColor={soundEnabled ? '#fff' : '#888'}
             />
           </View>
 
-          <View style={styles.divider} />
+          <View style={[styles.divider, { backgroundColor: colors.text + '22' }]} />
 
           {/* Theme */}
           <View style={styles.rowColumn}>
-            <Text style={styles.rowTitle}>Theme</Text>
-            <Text style={styles.rowSub}>Choose how the app looks</Text>
+            <Text style={[styles.rowTitle, { color: colors.text }]}>Theme</Text>
+            <Text style={[styles.rowSub, { color: colors.text + '99' }]}>Choose how the app looks</Text>
             <View style={styles.choicesRow}>
               <ThemeButton value="system" label="System" />
               <ThemeButton value="light" label="Light" />
@@ -86,8 +86,8 @@ export default function SettingsModal({ visible, onClose, soundEnabled, onToggle
 
           {/* Notification Frequency */}
           <View style={styles.rowColumn}>
-            <Text style={styles.rowTitle}>Notification Frequency</Text>
-            <Text style={styles.rowSub}>Control how often to alert you</Text>
+            <Text style={[styles.rowTitle, { color: colors.text }]}>Notification Frequency</Text>
+            <Text style={[styles.rowSub, { color: colors.text + '99' }]}>Control how often to alert you</Text>
             <View style={styles.choicesRow}>
               <FreqButton value="off" label="Off" />
               <FreqButton value="low" label="Low" />
@@ -97,8 +97,8 @@ export default function SettingsModal({ visible, onClose, soundEnabled, onToggle
           </View>
 
           <View style={styles.actionsRow}>
-            <TouchableOpacity style={styles.closeBtn} onPress={onClose} activeOpacity={0.8}>
-              <Text style={styles.closeBtnText}>Close</Text>
+            <TouchableOpacity style={[styles.closeBtn, { borderColor: colors.text + '22' }]} onPress={onClose} activeOpacity={0.8}>
+              <Text style={[styles.closeBtnText, { color: colors.text }]}>Close</Text>
             </TouchableOpacity>
           </View>
         </View>

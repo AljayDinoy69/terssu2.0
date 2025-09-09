@@ -14,6 +14,7 @@ import { playNotificationSound } from '../utils/sound';
 import { isSoundEnabled, setSoundEnabled, getNotificationFrequency, NotificationFrequency } from '../utils/settings';
 import ProfileModal from './ProfileModal';
 import SettingsModal from '../components/SettingsModal';
+import { useTheme } from '../components/ThemeProvider';
 
 export type ResponderDashProps = NativeStackScreenProps<RootStackParamList, 'ResponderDashboard'>;
 
@@ -28,6 +29,7 @@ const nextStatus: Record<ReportStatus, ReportStatus> = {
 };
 
 export default function ResponderDashboard({ navigation }: ResponderDashProps) {
+  const { colors, theme } = useTheme();
   const [reports, setReports] = useState<Report[]>([]);
   const [menuOpen, setMenuOpen] = useState(false);
   const [activeTab, setActiveTab] = useState<'pending' | 'active' | 'completed'>('pending');
@@ -393,14 +395,14 @@ export default function ResponderDashboard({ navigation }: ResponderDashProps) {
   };
 
   return (
-    <View style={styles.container}>
+    <View style={[styles.container, { backgroundColor: colors.background }]}>
       <View style={styles.backgroundPattern} pointerEvents="none" />
       
       {/* Header */}
       <Animated.View style={[styles.header, { transform: [{ scale: headerScale }] }]}> 
         <View style={styles.headerContent}>
-          <Text style={styles.title}>🚑 Responder Dashboard</Text>
-          <Text style={styles.subtitle}>Emergency Response Management</Text>
+          <Text style={[styles.title, { color: colors.text }]}>🚑 Responder Dashboard</Text>
+          <Text style={[styles.subtitle, { color: colors.text, opacity: 0.8 }]}>Emergency Response Management</Text>
           {/* Debug: show avatar URL used */}
           <Text style={styles.debugUrl} numberOfLines={1}>{String(currentUser?.avatarUrl || currentUser?.photoUrl || '')}</Text>
         </View>
@@ -419,7 +421,7 @@ export default function ResponderDashboard({ navigation }: ResponderDashProps) {
             {notifOpen && (
               <View style={[styles.dropdown, { maxHeight: 360 }]}> 
                 {notifs.length === 0 ? (
-                  <Text style={styles.emptyText}>No notifications yet</Text>
+                  <Text style={[styles.emptyText, { color: colors.text } ]}>No notifications yet</Text>
                 ) : (
                   <>
                     <View style={{ paddingHorizontal: 12, paddingBottom: 6, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
@@ -662,32 +664,32 @@ export default function ResponderDashboard({ navigation }: ResponderDashProps) {
       >
         <View style={styles.modalOverlay}>
           <View style={styles.modalContent}>
-            <Text style={styles.modalTitle}>Report Details</Text>
+            <Text style={[styles.modalTitle, { color: colors.text }]}>Report Details</Text>
             {!!detailReport && (
               <ScrollView style={styles.modalScroll} showsVerticalScrollIndicator={false}>
-                <View style={styles.modalRow}><Text style={styles.modalLabel}>Type:</Text><Text style={styles.modalValue}>{detailReport.type}</Text></View>
-                <View style={styles.modalRow}><Text style={styles.modalLabel}>Status:</Text><Text style={styles.modalValue}>{detailReport.status}</Text></View>
-                <View style={styles.modalRow}><Text style={styles.modalLabel}>Responder:</Text><Text style={styles.modalValue}>{nameMap[detailReport.responderId] || detailReport.responderId}</Text></View>
+                <View style={styles.modalRow}><Text style={[styles.modalLabel, { color: colors.text + '66' }]}>Type:</Text><Text style={[styles.modalValue, { color: colors.text }]}>{detailReport.type}</Text></View>
+                <View style={styles.modalRow}><Text style={[styles.modalLabel, { color: colors.text + '66' }]}>Status:</Text><Text style={[styles.modalValue, { color: colors.text }]}>{detailReport.status}</Text></View>
+                <View style={styles.modalRow}><Text style={[styles.modalLabel, { color: colors.text + '66' }]}>Responder:</Text><Text style={[styles.modalValue, { color: colors.text }]}>{nameMap[detailReport.responderId] || detailReport.responderId}</Text></View>
                 {detailReport.chiefComplaint ? (
-                  <View style={styles.modalRow}><Text style={styles.modalLabel}>Chief Complaint:</Text><Text style={styles.modalValue}>{detailReport.chiefComplaint}</Text></View>
+                  <View style={styles.modalRow}><Text style={[styles.modalLabel, { color: colors.text + '66' }]}>Chief Complaint:</Text><Text style={[styles.modalValue, { color: colors.text }]}>{detailReport.chiefComplaint}</Text></View>
                 ) : null}
                 {detailReport.description ? (
-                  <View style={styles.modalRow}><Text style={styles.modalLabel}>Description:</Text><Text style={styles.modalValue}>{detailReport.description}</Text></View>
+                  <View style={styles.modalRow}><Text style={[styles.modalLabel, { color: colors.text + '66' }]}>Description:</Text><Text style={[styles.modalValue, { color: colors.text }]}>{detailReport.description}</Text></View>
                 ) : null}
                 {detailReport.location ? (
-                  <View style={styles.modalRow}><Text style={styles.modalLabel}>Location:</Text><Text style={styles.modalValue}>{detailReport.location}</Text></View>
+                  <View style={styles.modalRow}><Text style={[styles.modalLabel, { color: colors.text + '66' }]}>Location:</Text><Text style={[styles.modalValue, { color: colors.text }]}>{detailReport.location}</Text></View>
                 ) : null}
                 {detailReport.fullName ? (
-                  <View style={styles.modalRow}><Text style={styles.modalLabel}>Full Name:</Text><Text style={styles.modalValue}>{detailReport.fullName}</Text></View>
+                  <View style={styles.modalRow}><Text style={[styles.modalLabel, { color: colors.text + '66' }]}>Full Name:</Text><Text style={[styles.modalValue, { color: colors.text }]}>{detailReport.fullName}</Text></View>
                 ) : null}
                 {detailReport.contactNo ? (
-                  <View style={styles.modalRow}><Text style={styles.modalLabel}>Contact:</Text><Text style={styles.modalValue}>{detailReport.contactNo}</Text></View>
+                  <View style={styles.modalRow}><Text style={[styles.modalLabel, { color: colors.text + '66' }]}>Contact:</Text><Text style={[styles.modalValue, { color: colors.text }]}>{detailReport.contactNo}</Text></View>
                 ) : null}
                 {detailReport.personsInvolved ? (
-                  <View style={styles.modalRow}><Text style={styles.modalLabel}>Persons Involved:</Text><Text style={styles.modalValue}>{detailReport.personsInvolved}</Text></View>
+                  <View style={styles.modalRow}><Text style={[styles.modalLabel, { color: colors.text + '66' }]}>Persons Involved:</Text><Text style={[styles.modalValue, { color: colors.text }]}>{detailReport.personsInvolved}</Text></View>
                 ) : null}
-                <View style={styles.modalRow}><Text style={styles.modalLabel}>From:</Text><Text style={styles.modalValue}>{detailReport.fullName || (detailReport.userId ? (nameMap[detailReport.userId] || 'Anonymous') : 'Anonymous')}</Text></View>
-                <View style={styles.modalRow}><Text style={styles.modalLabel}>Created:</Text><Text style={styles.modalValue}>{new Date(detailReport.createdAt).toLocaleString()}</Text></View>
+                <View style={styles.modalRow}><Text style={[styles.modalLabel, { color: colors.text + '66' }]}>From:</Text><Text style={[styles.modalValue, { color: colors.text }]}>{detailReport.fullName || (detailReport.userId ? (nameMap[detailReport.userId] || 'Anonymous') : 'Anonymous')}</Text></View>
+                <View style={styles.modalRow}><Text style={[styles.modalLabel, { color: colors.text + '66' }]}>Created:</Text><Text style={[styles.modalValue, { color: colors.text }]}>{new Date(detailReport.createdAt).toLocaleString()}</Text></View>
                 {(detailReport.photoUrl || detailReport.photoUri) ? (
                   <Image source={{ uri: detailReport.photoUrl || detailReport.photoUri }} style={styles.modalImage} resizeMode="cover" />
                 ) : null}
@@ -728,7 +730,7 @@ export default function ResponderDashboard({ navigation }: ResponderDashProps) {
       >
         <View style={styles.modalOverlay}>
           <View style={styles.mapModalContent}>
-            <Text style={styles.modalTitle}>Incident & My Location</Text>
+            <Text style={[styles.modalTitle, { color: colors.text }]}>Incident & My Location</Text>
             {mapError ? (
               <Text style={styles.mapErrorText}>⚠️ {mapError}</Text>
             ) : null}
@@ -744,10 +746,10 @@ export default function ResponderDashboard({ navigation }: ResponderDashProps) {
               )}
             </View>
             <View style={styles.mapLegend}>
-              <Text style={styles.mapLegendText}>📍 Incident: {incidentCoord ? `${incidentCoord.lat.toFixed(5)}, ${incidentCoord.lon.toFixed(5)}` : 'N/A'}</Text>
-              <Text style={styles.mapLegendText}>👤 Me: {myCoord ? `${myCoord.lat.toFixed(5)}, ${myCoord.lon.toFixed(5)}` : 'N/A'}</Text>
+              <Text style={[styles.mapLegendText, { color: colors.text + '99' }]}>📍 Incident: {incidentCoord ? `${incidentCoord.lat.toFixed(5)}, ${incidentCoord.lon.toFixed(5)}` : 'N/A'}</Text>
+              <Text style={[styles.mapLegendText, { color: colors.text + '99' }]}>👤 Me: {myCoord ? `${myCoord.lat.toFixed(5)}, ${myCoord.lon.toFixed(5)}` : 'N/A'}</Text>
               {incidentCoord && myCoord ? (
-                <Text style={styles.mapLegendText}>📏 Distance: {distanceKm(incidentCoord, myCoord).toFixed(2)} km</Text>
+                <Text style={[styles.mapLegendText, { color: colors.text + '99' }]}>📏 Distance: {distanceKm(incidentCoord, myCoord).toFixed(2)} km</Text>
               ) : null}
             </View>
             <View style={styles.modalActionsRow}>
