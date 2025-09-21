@@ -2,7 +2,7 @@ import React, { useEffect, useState, useRef } from 'react';
 import { View, Text, StyleSheet, FlatList, TouchableOpacity, TextInput, Alert, Animated, Dimensions, ScrollView, Image, Modal } from 'react-native';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { RootStackParamList } from '../navigation/AppNavigator';
-import { createResponder, deleteAccount, getCurrentUser, listAllReports, listUsers, logout, listNotifications, markNotificationRead, deleteNotification, markAllNotificationsRead, Notification as NotificationItem } from '../utils/auth';
+import { createResponder, deleteAccount, getCurrentUser, listAllReports, listUsers, logout, listNotifications, markNotificationRead, deleteNotification, markAllNotificationsRead, Notification as NotificationItem, listResponders } from '../utils/auth';
 import { API_BASE_URL } from '../utils/api';
 import { playNotificationSound } from '../utils/sound';
 import { isSoundEnabled, setSoundEnabled, getNotificationFrequency, NotificationFrequency } from '../utils/settings';
@@ -20,6 +20,7 @@ export default function AdminDashboard({ navigation }: AdminDashProps) {
   const { colors } = useTheme();
   const [users, setUsers] = useState<any[]>([]);
   const [reports, setReports] = useState<any[]>([]);
+  const [nameMapState, setNameMapState] = useState<Record<string, string>>({});
   const [form, setForm] = useState({ name: '', email: '', phone: '', password: 'responder123' });
   const [activeTab, setActiveTab] = useState<'users' | 'reports' | 'analytics'>('users');
   const [userQuery, setUserQuery] = useState('');
@@ -51,6 +52,8 @@ export default function AdminDashboard({ navigation }: AdminDashProps) {
   const [currentUser, setCurrentUser] = useState<any>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [notificationFreq, setNotificationFreq] = useState<NotificationFrequency>('normal');
+  const [imageViewerVisible, setImageViewerVisible] = useState(false);
+  const [imageViewerUri, setImageViewerUri] = useState<string | null>(null);
 
   // Animation values
   const fadeAnim = useRef(new Animated.Value(0)).current;
@@ -231,7 +234,15 @@ export default function AdminDashboard({ navigation }: AdminDashProps) {
       const freq = await getNotificationFrequency();
       setNotificationFreq(freq);
     } catch {}
-    setUsers(await listUsers());
+    const [usersList, responders] = await Promise.all([listUsers(), listResponders()]);
+    setUsers(usersList);
+    // Build a map of id -> name for both users and responders
+    const map: Record<string, string> = {};
+    try {
+      usersList.forEach((u: any) => { if (u?.id) map[String(u.id)] = u.name || String(u.id); });
+      responders.forEach((r: any) => { if (r?.id) map[String(r.id)] = r.name || String(r.id); });
+    } catch {}
+    setNameMapState(map);
     const all = await listAllReports();
     setReports([...all].sort((a, b) => Number(b?.createdAt ?? 0) - Number(a?.createdAt ?? 0)));
   };
@@ -368,6 +379,61 @@ export default function AdminDashboard({ navigation }: AdminDashProps) {
     }
   };
 
+  // Resolve account name by id for displaying in report details using combined map
+  const nameById = (id?: string | null) => {
+    if (!id) return undefined;
+    return nameMapState[String(id)];
+  };
+
+  // Group reports that represent the same incident (e.g., assigned to multiple responders)
+  // Heuristic:
+  // 1) Primary key: photoUrl if present; else normalized (type + description)
+  // 2) Within each key bucket, merge items whose createdAt are within a 10-minute window
+  const groupReports = (items: any[]) => {
+    const buckets: Record<string, any[]> = {};
+    const norm = (s: any) => String(s || '').trim().toLowerCase();
+    const keyOf = (r: any) => (r.photoUrl ? `photo:${norm(r.photoUrl)}` : `text:${norm(r.type)}|${norm(r.description)}`);
+
+    // Bucket by primary key
+    for (const r of items) {
+      const key = keyOf(r);
+      if (!buckets[key]) buckets[key] = [];
+      buckets[key].push(r);
+    }
+
+    const WINDOW = 10 * 60 * 1000; // 10 minutes
+    const merged: any[] = [];
+
+    for (const key of Object.keys(buckets)) {
+      const arr = buckets[key].slice().sort((a, b) => new Date(a.createdAt || 0).getTime() - new Date(b.createdAt || 0).getTime());
+      for (const r of arr) {
+        const t = new Date(r.createdAt || 0).getTime();
+        // Try to find an existing group within time window
+        let target = merged.find(g => g.__groupKey === key && Math.abs(new Date(g.createdAt || 0).getTime() - t) <= WINDOW);
+        if (!target) {
+          target = { ...r, responders: r.responderId ? [r.responderId] : [], __groupKey: key };
+          merged.push(target);
+        } else {
+          if (r.responderId) {
+            const arrResp: string[] = target.responders || [];
+            if (!arrResp.includes(r.responderId)) arrResp.push(r.responderId);
+            target.responders = arrResp;
+          }
+          // Keep earliest createdAt
+          const tPrev = new Date(target.createdAt || 0).getTime();
+          if (t < tPrev) target.createdAt = r.createdAt;
+          // Keep latest updatedAt
+          const uPrev = new Date(target.updatedAt || 0).getTime();
+          const uCurr = new Date(r.updatedAt || 0).getTime();
+          if (uCurr > uPrev) target.updatedAt = r.updatedAt;
+        }
+      }
+    }
+
+    // Remove helper key
+    return merged.map(g => { const { __groupKey, ...rest } = g; return rest; });
+  };
+
   const isPending = (status?: string) => status?.toLowerCase() === 'pending';
 
   const getRoleIcon = (role: string) => {
@@ -439,7 +505,15 @@ const renderReportCard = ({ item }: { item: any; index: number }) => (
       </Text>
     )}
     {(item.photoUrl || item.photoUri) ? (
-      <Image source={{ uri: item.photoUrl || item.photoUri }} style={styles.thumbnail} resizeMode="cover" />
+      <TouchableOpacity
+        activeOpacity={0.9}
+        onPress={() => {
+          setImageViewerUri(item.photoUrl || item.photoUri);
+          setImageViewerVisible(true);
+        }}
+      >
+        <Image source={{ uri: item.photoUrl || item.photoUri }} style={styles.thumbnail} resizeMode="cover" />
+      </TouchableOpacity>
     ) : null}
 
     <View style={styles.reportDetails}>
@@ -459,10 +533,14 @@ const renderReportCard = ({ item }: { item: any; index: number }) => (
         </Text>
       )}
       <Text style={styles.reportMeta} numberOfLines={1} ellipsizeMode="tail">
-        👨‍⚕️ Responder: {item.responderId}
+        👨‍⚕️ Responder{Array.isArray(item.responders) && item.responders.length > 1 ? 's' : ''}: {
+          Array.isArray(item.responders) && item.responders.length > 0
+            ? item.responders.map((rid: string) => nameById(rid) || rid).join(', ')
+            : (nameById(item.responderId) || 'Unassigned')
+        }
       </Text>
       <Text style={styles.reportMeta} numberOfLines={1} ellipsizeMode="tail">
-        👤 Reporter: {item.userId || 'Anonymous'}
+        👤 Reporter: {item.fullName ? item.fullName : (item.userId ? (nameById(item.userId) || 'Anonymous') : 'Anonymous')}
       </Text>
       <Text style={styles.reportMeta}>
         📅 Created: {item.createdAt ? new Date(item.createdAt).toLocaleString() : '—'}
@@ -504,94 +582,102 @@ return (
             )}
           </TouchableOpacity>
           {notifOpen && (
-            <View style={[styles.dropdown, { maxHeight: 360 }]}>  
-              {notifs.length === 0 ? (
-                <Text style={[styles.emptyText, { color: colors.text + '99' }]}>No notifications yet</Text>
-              ) : (
-                <>
-                  <View style={{ paddingHorizontal: 12, paddingBottom: 6, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
-                    <Text style={{ color: colors.text + '99', fontWeight: '700' }}>Notifications</Text>
-                    {unseen > 0 && (
-                      <TouchableOpacity 
-                        onPress={async () => {
-                          try {
-                            const me = await getCurrentUser(); if (!me) return;
-                            await markAllNotificationsRead(me.id);
-                            setNotifs(prev => prev.map(x => ({ ...x, read: true })));
-                            unseenRef.current = 0; setUnseen(0);
-                          } catch {}
-                        }}
-                        activeOpacity={0.8}
-                      >
-                        <Text style={{ color: '#66d9ef', fontWeight: '800' }}>Mark all as read</Text>
-                      </TouchableOpacity>
-                    )}
+            <Modal visible={notifOpen} transparent animationType="fade" onRequestClose={() => setNotifOpen(false)}>
+              <View style={styles.modalOverlay}>
+                <TouchableOpacity style={StyleSheet.absoluteFill as any} activeOpacity={1} onPress={() => setNotifOpen(false)} />
+                <View style={styles.modalContent}>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
+                    <Text style={{ color: colors.text + '99', fontWeight: '700', fontSize: 16 }}>Notifications</Text>
+                    <TouchableOpacity onPress={() => setNotifOpen(false)}>
+                      <Text style={{ color: colors.text + '99', fontSize: 18 }}>✖</Text>
+                    </TouchableOpacity>
                   </View>
-                  <ScrollView style={{ maxHeight: 300 }} contentContainerStyle={{ paddingBottom: 8 }} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
-                    {notifs.map(n => (
-                      <TouchableOpacity
-                        key={n.id}
-                        style={[styles.notifItem, { opacity: n.read ? 0.7 : 1 }]}
-                        onPress={async () => {
-                          // Load report and open modal
-                          if (n.reportId) {
-                            const rep = reports.find(r => String(r.id) === String(n.reportId));
-                            if (rep) setDetailReport(rep);
-                            else {
-                              const all = await listAllReports();
-                              const found = all.find(r => String(r.id) === String(n.reportId)) || null;
-                              if (found) setDetailReport(found);
-                            }
-                          }
-                          try {
-                            if (!n.read) {
-                              await markNotificationRead(n.id, true);
-                              setNotifs(prev => prev.map(x => x.id === n.id ? { ...x, read: true } : x));
-                              if (unseenRef.current > 0) { unseenRef.current -= 1; setUnseen(unseenRef.current); }
-                            }
-                          } catch {}
-                          setNotifOpen(false);
-                        }}
-                        activeOpacity={0.85}
-                      >
-                        <Text style={[styles.notifDot, { color: n.kind === 'new' ? '#ffd166' : '#66d9ef' }]}>•</Text>
-                        <View style={{ flex: 1 }}>
-                          <Text style={[styles.notifTitle, { color: colors.text, fontWeight: n.read ? '600' : '800' }]}>{n.title}</Text>
-                          <Text style={[styles.notifTime, { color: colors.text + '66' }]}>{n.createdAt ? new Date(n.createdAt as any).toLocaleTimeString() : ''}</Text>
-                        </View>
-                        <TouchableOpacity
+                  {notifs.length === 0 ? (
+                    <Text style={[styles.emptyText, { color: colors.text + '99' }]}>No notifications yet</Text>
+                  ) : (
+                    <>
+                      {unseen > 0 && (
+                        <TouchableOpacity 
                           onPress={async () => {
                             try {
-                              const next = !n.read; await markNotificationRead(n.id, next);
-                              setNotifs(prev => prev.map(x => x.id === n.id ? { ...x, read: next } : x));
-                              unseenRef.current = Math.max(0, unseenRef.current + (next ? -1 : 1));
-                              setUnseen(unseenRef.current);
+                              const me = await getCurrentUser(); if (!me) return;
+                              await markAllNotificationsRead(me.id);
+                              setNotifs(prev => prev.map(x => ({ ...x, read: true })));
+                              unseenRef.current = 0; setUnseen(0);
                             } catch {}
                           }}
-                          style={{ paddingHorizontal: 8, paddingVertical: 4 }}
-                          activeOpacity={0.7}
+                          activeOpacity={0.8}
+                          style={{ alignSelf: 'flex-end', marginBottom: 8 }}
                         >
-                          <Text style={{ color: '#ffd166', fontWeight: '800' }}>{n.read ? 'Unread' : 'Read'}</Text>
+                          <Text style={{ color: '#66d9ef', fontWeight: '800' }}>Mark all as read</Text>
                         </TouchableOpacity>
-                        <TouchableOpacity
-                          onPress={async () => {
-                            try {
-                              await deleteNotification(n.id);
-                              setNotifs(prev => prev.filter(x => x.id !== n.id));
-                              if (!n.read && unseenRef.current > 0) { unseenRef.current -= 1; setUnseen(unseenRef.current); }
-                            } catch {}
-                          }}
-                          style={{ paddingHorizontal: 8, paddingVertical: 4 }}
-                          activeOpacity={0.7}
-                        >
-                          <Text style={{ color: '#d90429', fontWeight: '800' }}>Delete</Text>
-                        </TouchableOpacity>
-                      </TouchableOpacity>
-                    ))}
-                  </ScrollView>
-                </>
-              )}
-            </View>
+                      )}
+                      <ScrollView style={{ maxHeight: 360 }} contentContainerStyle={{ paddingBottom: 8 }} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
+                        {notifs.map(n => (
+                          <TouchableOpacity
+                            key={n.id}
+                            style={[styles.notifItem, { opacity: n.read ? 0.7 : 1 }]}
+                            onPress={async () => {
+                              if (n.reportId) {
+                                const rep = reports.find(r => String(r.id) === String(n.reportId));
+                                if (rep) setDetailReport(rep);
+                                else {
+                                  const all = await listAllReports();
+                                  const found = all.find(r => String(r.id) === String(n.reportId)) || null;
+                                  if (found) setDetailReport(found);
+                                }
+                              }
+                              try {
+                                if (!n.read) {
+                                  await markNotificationRead(n.id, true);
+                                  setNotifs(prev => prev.map(x => x.id === n.id ? { ...x, read: true } : x));
+                                  if (unseenRef.current > 0) { unseenRef.current -= 1; setUnseen(unseenRef.current); }
+                                }
+                              } catch {}
+                              setNotifOpen(false);
+                            }}
+                            activeOpacity={0.85}
+                          >
+                            <Text style={[styles.notifDot, { color: n.kind === 'new' ? '#ffd166' : '#66d9ef' }]}>•</Text>
+                            <View style={{ flex: 1 }}>
+                              <Text style={[styles.notifTitle, { color: colors.text, fontWeight: n.read ? '600' : '800' }]}>{n.title}</Text>
+                              <Text style={[styles.notifTime, { color: colors.text + '66' }]}>{n.createdAt ? new Date(n.createdAt as any).toLocaleTimeString() : ''}</Text>
+                            </View>
+                            <TouchableOpacity
+                              onPress={async () => {
+                                try {
+                                  const next = !n.read; await markNotificationRead(n.id, next);
+                                  setNotifs(prev => prev.map(x => x.id === n.id ? { ...x, read: next } : x));
+                                  unseenRef.current = Math.max(0, unseenRef.current + (next ? -1 : 1));
+                                  setUnseen(unseenRef.current);
+                                } catch {}
+                              }}
+                              style={{ paddingHorizontal: 8, paddingVertical: 4 }}
+                              activeOpacity={0.7}
+                            >
+                              <Text style={{ color: '#ffd166', fontWeight: '800' }}>{n.read ? 'Unread' : 'Read'}</Text>
+                            </TouchableOpacity>
+                            <TouchableOpacity
+                              onPress={async () => {
+                                try {
+                                  await deleteNotification(n.id);
+                                  setNotifs(prev => prev.filter(x => x.id !== n.id));
+                                  if (!n.read && unseenRef.current > 0) { unseenRef.current -= 1; setUnseen(unseenRef.current); }
+                                } catch {}
+                              }}
+                              style={{ paddingHorizontal: 8, paddingVertical: 4 }}
+                              activeOpacity={0.7}
+                            >
+                              <Text style={{ color: '#d90429', fontWeight: '800' }}>Delete</Text>
+                            </TouchableOpacity>
+                          </TouchableOpacity>
+                        ))}
+                      </ScrollView>
+                    </>
+                  )}
+                </View>
+              </View>
+            </Modal>
           )}
         </View>
         <TouchableOpacity style={styles.menuBtn} onPress={() => setMenuOpen(v => !v)} activeOpacity={0.8}>
@@ -713,6 +799,38 @@ return (
         onToggleSound={async (next) => { setSoundEnabledState(next); await setSoundEnabled(next); }}
       />
 
+      {/* Full-screen Image Viewer */}
+      <Modal
+        visible={imageViewerVisible}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setImageViewerVisible(false)}
+      >
+        <View style={styles.viewerOverlay}>
+          <TouchableOpacity
+            style={StyleSheet.absoluteFill as any}
+            activeOpacity={1}
+            onPress={() => setImageViewerVisible(false)}
+          />
+          <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
+            {!!imageViewerUri && (
+              <Image
+                source={{ uri: imageViewerUri }}
+                style={styles.viewerImage}
+                resizeMode="contain"
+              />
+            )}
+          </View>
+          <TouchableOpacity
+            onPress={() => setImageViewerVisible(false)}
+            style={styles.viewerCloseBtn}
+            activeOpacity={0.8}
+          >
+            <Text style={styles.viewerCloseText}>✕</Text>
+          </TouchableOpacity>
+        </View>
+      </Modal>
+
             {/* Action Buttons */}
             <View style={styles.modalActionRow}>
               <TouchableOpacity style={styles.modalCancelBtn} onPress={cancelProfileEdit}>
@@ -728,6 +846,34 @@ return (
 
       {/* User Details Modal */}
       <Modal visible={!!detailUser} transparent animationType="fade" onRequestClose={() => setDetailUser(null)}>
+        <View style={styles.container}>
+          <View style={styles.backgroundPattern} />
+          <View style={styles.header}>
+            <View style={styles.headerContent}>
+              <Text style={styles.title}>Admin Dashboard</Text>
+              <Text style={styles.subtitle}>Manage users, reports, and analytics</Text>
+            </View>
+            <View style={styles.headerActions}>
+              <TouchableOpacity
+                style={styles.bellBtn}
+                onPress={() => setNotifOpen(true)}
+              >
+                <Text style={styles.bellIcon}>🔔</Text>
+                {unseen > 0 && (
+                  <View style={styles.badge}>
+                    <Text style={styles.badgeText}>{unseen}</Text>
+                  </View>
+                )}
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.menuBtn}
+                onPress={() => setMenuOpen(true)}
+              >
+                <Text style={styles.menuBtnText}>☰</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
         <View style={styles.modalOverlay}>
           <View style={styles.modalContent}>
             <Text style={styles.modalTitle}>👤 User Details</Text>
@@ -803,8 +949,14 @@ return (
                 {detailReport.personsInvolved && (
                   <Text style={styles.modalRow}>👥 Persons Involved: {detailReport.personsInvolved}</Text>
                 )}
-                <Text style={styles.modalRow}>👨‍⚕️ Responder: {detailReport.responderId}</Text>
-                <Text style={styles.modalRow}>👤 Reporter: {detailReport.userId || 'Anonymous'}</Text>
+                <Text style={styles.modalRow}>
+                  👨‍⚕️ Responder{Array.isArray(detailReport.responders) && detailReport.responders.length > 1 ? 's' : ''}: {
+                    Array.isArray(detailReport.responders) && detailReport.responders.length > 0
+                      ? detailReport.responders.map((rid: string) => nameById(rid) || rid).join(', ')
+                      : (nameById(detailReport.responderId) || 'Unassigned')
+                  }
+                </Text>
+                <Text style={styles.modalRow}>👤 Reporter: {detailReport.fullName ? detailReport.fullName : (detailReport.userId ? (nameById(detailReport.userId) || 'Anonymous') : 'Anonymous')}</Text>
                 <Text style={styles.modalRow}>📅 Created: {detailReport.createdAt ? new Date(detailReport.createdAt).toLocaleString() : '—'}</Text>
                 {detailReport.updatedAt && (
                   <Text style={styles.modalRow}>🔄 Updated: {new Date(detailReport.updatedAt).toLocaleString()}</Text>
@@ -824,61 +976,11 @@ return (
         </View>
       </Modal>
 
-      <ScrollView style={styles.scrollContainer} showsVerticalScrollIndicator={false}>
-        {/* Stats Overview */}
-        <Animated.View
-          style={[
-            styles.statsContainer,
-            {
-              opacity: fadeAnim,
-              transform: [
-                { translateY: slideAnim },
-                { scale: statsScale }
-              ],
-            },
-          ]}
-        >
-          <Text style={styles.sectionTitle}>📊 System Overview</Text>
-          <View style={styles.statsGrid}>
-            <View style={[styles.statCard, { backgroundColor: '#667eea20' }]}>
-              <Text style={styles.statNumber}>{stats.totalUsers}</Text>
-              <Text style={styles.statLabel}>👥 Users</Text>
-            </View>
-            <View style={[styles.statCard, { backgroundColor: '#00ff8820' }]}>
-              <Text style={styles.statNumber}>{stats.totalResponders}</Text>
-              <Text style={styles.statLabel}>🚑 Responders</Text>
-            </View>
-            <View style={[styles.statCard, { backgroundColor: '#ff980020' }]}>
-              <Text style={styles.statNumber}>{stats.pendingReports}</Text>
-              <Text style={styles.statLabel}>⏳ Pending</Text>
-            </View>
-            <View style={[styles.statCard, { backgroundColor: '#4caf5020' }]}>
-              <Text style={styles.statNumber}>{stats.resolvedReports}</Text>
-              <Text style={styles.statLabel}>✅ Resolved</Text>
-            </View>
-          </View>
-        </Animated.View>
-
-        {/* Top Tabs */}
-        <Animated.View style={[styles.tabsContainer, { opacity: fadeAnim, transform: [{ translateY: slideAnim }] }]}>
-          {(
-            [
-              { key: 'users', label: 'User Management' },
-              { key: 'reports', label: 'All Reports' },
-              { key: 'analytics', label: 'System Analytics' },
-            ] as const
-          ).map(t => (
-            <TouchableOpacity key={t.key} style={[styles.tabItem, activeTab === t.key && styles.tabItemActive]} onPress={() => setActiveTab(t.key)}>
-              <Text
-                style={[styles.tabText, activeTab === t.key && styles.tabTextActive]}
-                numberOfLines={1}
-                ellipsizeMode="tail"
-              >
-                {t.label}
-              </Text>
-            </TouchableOpacity>
-          ))}
-        </Animated.View>
+      <ScrollView 
+        style={styles.scrollContainer} 
+        showsVerticalScrollIndicator={false}
+        contentContainerStyle={{ paddingBottom: 90, paddingTop: 20 }} // Add padding to prevent content from being hidden behind the footer
+      >
 
         {/* Users Management (Tab) */}
         {activeTab === 'users' && (
@@ -941,7 +1043,7 @@ return (
                       activeOpacity={1} 
                       onPress={() => setUserSortDropdown(false)}
                     />
-                    <View style={[styles.dropdown, { top: 44, right: 0, width: 180, zIndex: 1000 }]}>
+                    <View style={[styles.dropdown, { top: 44, right: 0, width: 180, zIndex: 5000, elevation: 60 }]}>
                       {[
                         { key: 'name_asc', label: '👤 Name A-Z' },
                         { key: 'name_desc', label: '👤 Name Z-A' },
@@ -1024,9 +1126,9 @@ return (
             <Text style={styles.sectionSubtitle}>Filter and sort reports by status to manage emergency response efficiently.</Text>
             
             {/* Report Status Filter */}
-            <View style={[styles.filterRow, reportSortDropdown && { zIndex: 4000, elevation: 60 }]}>
+            <View style={[styles.filterRow, reportSortDropdown && { zIndex: 4000, elevation: 50 }]}>
               <Text style={styles.sortLabel}>Filter by:</Text>
-              <View style={{ position: 'relative', zIndex: reportSortDropdown ? 4000 : 1, elevation: reportSortDropdown ? 60 : 0 }}>
+              <View style={{ position: 'relative', zIndex: reportSortDropdown ? 10000 : 1, elevation: reportSortDropdown ? 100 : 0 }}>
                 <TouchableOpacity
                   style={[styles.sortDropdownBtn, reportSortDropdown && styles.sortDropdownBtnActive]}
                   onPress={() => setReportSortDropdown(!reportSortDropdown)}
@@ -1049,11 +1151,11 @@ return (
                 {reportSortDropdown && (
                   <>
                     <TouchableOpacity 
-                      style={[styles.dropdownBackdrop]} 
+                      style={styles.dropdownBackdrop} 
                       activeOpacity={1} 
                       onPress={() => setReportSortDropdown(false)}
                     />
-                    <View style={[styles.dropdown, { top: 44, right: 0, width: 180, zIndex: 5000, elevation: 80 }]}>
+                    <View style={[styles.dropdown, { top: 44, right: 0, width: 180 }]}>
                       {[
                         { key: 'all', label: '📋 All Reports' },
                         { key: 'pending', label: '⏳ Pending' },
@@ -1099,10 +1201,12 @@ return (
                 const sortedReports = [...filteredReports].sort((a, b) => 
                   new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime()
                 );
+                // Group duplicate incidents so one card shows multiple responders
+                const groupedReports = groupReports(sortedReports);
 
                 return (
                   <FlatList
-                    data={sortedReports}
+                    data={groupedReports}
                     keyExtractor={(item) => item.id}
                     renderItem={renderReportCard}
                     scrollEnabled={false}
@@ -1132,6 +1236,29 @@ return (
           <Animated.View style={[styles.listContainer, { opacity: fadeAnim, transform: [{ translateY: slideAnim }] }]}>
             <Text style={styles.sectionTitle}>📊 System Analytics</Text>
             <Text style={styles.sectionSubtitle}>Comprehensive system performance and usage insights</Text>
+
+            {/* System Overview */}
+            <View style={[styles.statsContainer, { marginBottom: 20 }]}>
+              <Text style={[styles.sectionTitle, { fontSize: 18, marginBottom: 12 }]}>📊 System Overview</Text>
+              <View style={styles.statsGrid}>
+                <View style={[styles.statCard, { backgroundColor: '#667eea20' }]}>
+                  <Text style={styles.statNumber}>{stats.totalUsers}</Text>
+                  <Text style={styles.statLabel}>👥 Users</Text>
+                </View>
+                <View style={[styles.statCard, { backgroundColor: '#00ff8820' }]}>
+                  <Text style={styles.statNumber}>{stats.totalResponders}</Text>
+                  <Text style={styles.statLabel}>🚑 Responders</Text>
+                </View>
+                <View style={[styles.statCard, { backgroundColor: '#ff980020' }]}>
+                  <Text style={styles.statNumber}>{stats.pendingReports}</Text>
+                  <Text style={styles.statLabel}>⏳ Pending</Text>
+                </View>
+                <View style={[styles.statCard, { backgroundColor: '#4caf5020' }]}>
+                  <Text style={styles.statNumber}>{stats.resolvedReports}</Text>
+                  <Text style={styles.statLabel}>✅ Resolved</Text>
+                </View>
+              </View>
+            </View>
 
             {/* Analytics Grid */}
             <View style={styles.analyticsGrid}>
@@ -1361,6 +1488,42 @@ return (
           </Animated.View>
         )}
       </ScrollView>
+      
+      {/* Sticky Footer */}
+      <View style={styles.footer}>
+        <TouchableOpacity 
+          style={[styles.footerButton, activeTab === 'users' && styles.activeFooterButton]}
+          onPress={() => setActiveTab('users')}
+          activeOpacity={0.7}
+        >
+          <Text style={[styles.footerIcon, activeTab === 'users' && styles.activeFooterIcon]}>
+            {activeTab === 'users' ? '👥' : '👤'}
+          </Text>
+          <Text style={[styles.footerText, activeTab === 'users' && styles.activeFooterText]}>Users</Text>
+        </TouchableOpacity>
+        
+        <TouchableOpacity 
+          style={[styles.footerButton, activeTab === 'reports' && styles.activeFooterButton]}
+          onPress={() => setActiveTab('reports')}
+          activeOpacity={0.7}
+        >
+          <Text style={[styles.footerIcon, activeTab === 'reports' && styles.activeFooterIcon]}>
+            {activeTab === 'reports' ? '📋' : '📄'}
+          </Text>
+          <Text style={[styles.footerText, activeTab === 'reports' && styles.activeFooterText]}>Reports</Text>
+        </TouchableOpacity>
+        
+        <TouchableOpacity 
+          style={[styles.footerButton, activeTab === 'analytics' && styles.activeFooterButton]}
+          onPress={() => setActiveTab('analytics')}
+          activeOpacity={0.7}
+        >
+          <Text style={[styles.footerIcon, activeTab === 'analytics' && styles.activeFooterIcon]}>
+            {activeTab === 'analytics' ? '📊' : '📈'}
+          </Text>
+          <Text style={[styles.footerText, activeTab === 'analytics' && styles.activeFooterText]}>Analytics</Text>
+        </TouchableOpacity>
+      </View>
     </View>
   );
 }
@@ -1369,6 +1532,10 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: '#0f0f23',
+  },
+  scrollContainer: {
+    flex: 1,
+    paddingBottom: 70, // Add padding to prevent content from being hidden behind the footer
   },
   backgroundPattern: {
     position: 'absolute',
@@ -1503,23 +1670,71 @@ const styles = StyleSheet.create({
     fontSize: 10,
     fontWeight: '800',
   },
+  // Sticky Footer Styles
+  footer: {
+    flexDirection: 'row',
+    justifyContent: 'space-around',
+    alignItems: 'center',
+    backgroundColor: '#1a1a2e',
+    borderTopWidth: 1,
+    borderTopColor: '#333',
+    paddingVertical: 12,
+    paddingBottom: 24, // Extra padding for iPhone X+ bottom safe area
+    position: 'absolute',
+    bottom: 0,
+    left: 0,
+    right: 0,
+    zIndex: 1000,
+    elevation: 10,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: -2 },
+    shadowOpacity: 0.2,
+    shadowRadius: 4,
+  },
+  footerButton: {
+    alignItems: 'center',
+    flex: 1,
+    paddingVertical: 8,
+    borderRadius: 8,
+    marginHorizontal: 2,
+  },
+  activeFooterButton: {
+    backgroundColor: 'rgba(102, 126, 234, 0.2)',
+  },
+  footerIcon: {
+    fontSize: 22,
+    marginBottom: 4,
+    color: '#888',
+  },
+  activeFooterIcon: {
+    color: '#667eea',
+  },
+  footerText: {
+    fontSize: 12,
+    color: '#888',
+    fontWeight: '600',
+  },
+  activeFooterText: {
+    color: '#667eea',
+    fontWeight: '700',
+  },
   dropdown: {
     position: 'absolute',
     right: 0,
     top: 44,
+    zIndex: 10000,
+    elevation: 100,
     backgroundColor: '#0f0f23',
     borderWidth: 1,
     borderColor: '#333',
     borderRadius: 10,
-    width: Math.min(width * 0.8, 280),
+    width: 180,
     maxHeight: 260,
     paddingVertical: 8,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 6 },
     shadowOpacity: 0.3,
     shadowRadius: 10,
-    elevation: 30,
-    zIndex: 2000,
   },
   dropdownBackdrop: {
     position: 'absolute',
@@ -1567,14 +1782,12 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     fontSize: 14,
   },
-  scrollContainer: {
-    flex: 1,
-  },
   tabsContainer: {
     flexDirection: 'row',
     gap: 8,
     paddingHorizontal: 20,
     marginBottom: 8,
+    marginTop: 8,
   },
   tabItem: {
     flex: 1,
@@ -1670,6 +1883,8 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     gap: 8,
     marginBottom: 12,
+    position: 'relative',
+    zIndex: 1,
   },
   chip: {
     backgroundColor: '#2a2a3e',
@@ -2352,4 +2567,28 @@ const styles = StyleSheet.create({
     color: '#fff',
     fontWeight: '800',
   },
-});``
+  viewerOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.95)'
+  },
+  viewerImage: {
+    width: width,
+    height: '80%',
+  },
+  viewerCloseBtn: {
+    position: 'absolute',
+    top: 40,
+    right: 20,
+    backgroundColor: 'rgba(255,255,255,0.15)',
+    borderRadius: 20,
+    width: 36,
+    height: 36,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  viewerCloseText: {
+    color: '#fff',
+    fontSize: 18,
+    fontWeight: '900',
+  },
+});

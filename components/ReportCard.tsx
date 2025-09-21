@@ -8,9 +8,10 @@ interface ReportCardProps {
   index: number;
   nameMap?: Record<string, string>;
   onPress?: () => void;
+  onImagePress?: (uri: string) => void;
 }
 
-export const ReportCard: React.FC<ReportCardProps> = ({ item, index, nameMap, onPress }) => {
+export const ReportCard: React.FC<ReportCardProps> = ({ item, index, nameMap, onPress, onImagePress }) => {
   const { colors } = useTheme();
   const themed = useMemo(() => StyleSheet.create({
     card: {
@@ -60,11 +61,16 @@ export const ReportCard: React.FC<ReportCardProps> = ({ item, index, nameMap, on
 
       {/* Display image if available */}
       {(item.photoUrl || item.photoUri) ? (
-        <Image
-          source={{ uri: item.photoUrl || item.photoUri }}
-          style={[styles.thumbnail, themed.thumbBorder]}
-          resizeMode="cover"
-        />
+        <TouchableOpacity
+          activeOpacity={0.9}
+          onPress={() => onImagePress && onImagePress(item.photoUrl || item.photoUri || '')}
+        >
+          <Image
+            source={{ uri: item.photoUrl || item.photoUri }}
+            style={[styles.thumbnail, themed.thumbBorder]}
+            resizeMode="cover"
+          />
+        </TouchableOpacity>
       ) : null}
 
       <View style={[styles.reportDetails, themed.detailsBorder]}>
@@ -84,10 +90,10 @@ export const ReportCard: React.FC<ReportCardProps> = ({ item, index, nameMap, on
           </Text>
         )}
         <Text style={[styles.meta, themed.meta]} numberOfLines={1} ellipsizeMode="tail">
-          👨‍🚒 Responder: {item.responderId}
+          👨‍🚒 Responder: {nameMap?.[item.responderId || ''] || 'Unassigned'}
         </Text>
         <Text style={[styles.meta, themed.meta]} numberOfLines={1} ellipsizeMode="middle">
-          👤 From: {item.fullName || (item.userId ? (nameMap?.[item.userId] || 'Reporter') : 'Anonymous')}
+          👤 From: {item.fullName || (item.userId ? (nameMap?.[item.userId] || 'Anonymous') : 'Anonymous')}
         </Text>
         <Text style={[styles.meta, themed.meta]}>
           📅 Created: {new Date(item.createdAt).toLocaleString()}

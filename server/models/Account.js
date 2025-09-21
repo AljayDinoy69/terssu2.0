@@ -7,6 +7,11 @@ const AccountSchema = new mongoose.Schema(
     phone: { type: String },
     role: { type: String, enum: ['user', 'responder', 'admin'], default: 'user', index: true },
     password: { type: String, required: true },
+    // Optional profile fields
+    photoUrl: { type: String },
+    avatarUrl: { type: String },
+    address: { type: String },
+    emergencyContact: { type: String },
   },
   { timestamps: true }
 );

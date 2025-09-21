@@ -158,19 +158,51 @@ app.get('/auth/me', async (req, res) => {
 
 app.patch('/auth/me', async (req, res) => {
   try {
-    const { email, password, name, phone } = req.body || {};
-    if (!email || !password) return res.status(400).json({ error: 'Email and password required for authentication' });
+    const { id, email, password, authEmail, authPassword, newEmail, newPassword, name, phone, photoUrl, avatarUrl, ...rest } = req.body || {};
     
-    const acc = await Account.findOne({ email: String(email).toLowerCase(), password });
-    if (!acc) return res.status(401).json({ error: 'Invalid credentials' });
+    // Determine auth creds (support both legacy email/password and authEmail/authPassword)
+    const aEmail = authEmail || email;
+    const aPass = authPassword || password;
+
+    // For sensitive updates (newEmail, newPassword), require authentication
+    if ((newEmail || newPassword) && (!aEmail || !aPass)) {
+      return res.status(400).json({ error: 'Email and password both required for sensitive updates' });
+    }
+    
+    let acc;
+    if (aEmail && aPass) {
+      // Authenticate for sensitive updates
+      acc = await Account.findOne({ email: String(aEmail).toLowerCase(), password: aPass });
+      if (!acc) return res.status(401).json({ error: 'Invalid credentials' });
+    } else {
+      // For non-sensitive updates, require a valid user id
+      if (!id) return res.status(400).json({ error: 'User id is required for profile updates' });
+      acc = await Account.findById(id);
+      if (!acc) return res.status(404).json({ error: 'User not found' });
+    }
     
     // Update allowed fields
     const updates = {};
     if (name !== undefined) updates.name = name;
     if (phone !== undefined) updates.phone = phone;
+    if (photoUrl !== undefined) updates.photoUrl = photoUrl;
+    if (avatarUrl !== undefined) updates.avatarUrl = avatarUrl;
     
-    const updatedDoc = await Account.findByIdAndUpdate(acc._id, updates, { new: true, projection: { password: 0 } });
+    // Only update email/password if provided (and already authenticated)
+    if (newEmail) updates.email = String(newEmail).toLowerCase();
+    if (newPassword) updates.password = newPassword;
+    
+    const updatedDoc = await Account.findByIdAndUpdate(acc._id, updates, { 
+      new: true, 
+      projection: { password: 0 } 
+    });
+    
     const updated = updatedDoc ? withId(updatedDoc.toObject()) : null;
+    
+    // Broadcast update to all connected clients
+    if (updated) {
+      sseBroadcast({ type: 'user:update', user: updated });
+    }
     
     res.json({ user: updated });
   } catch (err) {
@@ -262,6 +294,17 @@ app.get('/responders', async (_req, res) => {
   }
 });
 
+app.get('/admins', async (_req, res) => {
+  try {
+    const adminsRaw = await Account.find({ role: 'admin' }, { password: 0 }).lean();
+    const admins = adminsRaw.map(withId);
+    res.json({ admins });
+  } catch (err) {
+    console.error('List admins error', err);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
 // Reports
 app.post('/reports', async (req, res) => {
   try {
@@ -298,7 +341,7 @@ app.post('/reports', async (req, res) => {
     // Broadcast SSE event for new report
     sseBroadcast({ type: 'report:new', report });
 
-    // Create a Notification for the assigned responder
+    // Create a Notification for the assigned responder and all admins
     try {
       if (report.responderId) {
         const notif = await Notification.create({
@@ -309,6 +352,23 @@ app.post('/reports', async (req, res) => {
           read: false,
         });
         console.log('Created responder notification for report:', report.id, 'responder:', report.responderId);
+      }
+
+      // Notify all admins so they see the new report in their notifications
+      try {
+        const admins = await Account.find({ role: 'admin' }).lean();
+        for (const admin of admins) {
+          await Notification.create({
+            userId: String(admin._id),
+            title: 'New report submitted',
+            reportId: String(report.id),
+            kind: 'new',
+            read: false,
+          });
+        }
+        console.log('Created admin notifications for new report:', report.id, 'adminCount:', admins?.length || 0);
+      } catch (e) {
+        console.error('Create admin notifications error', e);
       }
     } catch (e) { console.error('Create notification error', e); }
   } catch (err) {
@@ -322,7 +382,7 @@ app.get('/reports', async (_req, res) => {
     // Get both regular and anonymous reports
     const [regularReports, anonymousReports] = await Promise.all([
       Report.find({}).sort({ createdAt: -1 }).lean(),
-      AnonymousReport.find({}).sort({ createdAt: -1 }).lean()
+      AnonymousReport.find({}).sort({ createdAt: -1 })
     ]);
 
     const regularReportsMapped = regularReports.map(withId);
@@ -351,7 +411,7 @@ app.get('/reports/user/:userId', async (req, res) => {
 // Anonymous Reports API
 app.get('/anonymous-reports', async (_req, res) => {
   try {
-    const reportsRaw = await AnonymousReport.find({}).sort({ createdAt: -1 }).lean();
+    const reportsRaw = await AnonymousReport.find({}).sort({ createdAt: -1 });
     const reports = reportsRaw.map(r => r.toClient());
     res.json({ reports });
   } catch (err) {
@@ -363,7 +423,7 @@ app.get('/anonymous-reports', async (_req, res) => {
 app.get('/anonymous-reports/device/:deviceId', async (req, res) => {
   try {
     const { deviceId } = req.params;
-    const reportsRaw = await AnonymousReport.find({ deviceId }).sort({ createdAt: -1 }).lean();
+    const reportsRaw = await AnonymousReport.find({ deviceId }).sort({ createdAt: -1 });
     const reports = reportsRaw.map(r => r.toClient());
     res.json({ reports });
   } catch (err) {
@@ -379,7 +439,7 @@ app.get('/reports/responder/:responderId', async (req, res) => {
     // Get both regular and anonymous reports for this responder
     const [regularReports, anonymousReports] = await Promise.all([
       Report.find({ responderId }).sort({ createdAt: -1 }).lean(),
-      AnonymousReport.find({ responderId }).sort({ createdAt: -1 }).lean()
+      AnonymousReport.find({ responderId }).sort({ createdAt: -1 })
     ]);
 
     const regularReportsMapped = regularReports.map(withId);
@@ -486,7 +546,7 @@ app.get('/notifications', async (req, res) => {
     } else if (deviceId) {
       // Fetch anonymous notifications for anonymous users
       console.log('Fetching anonymous notifications for deviceId:', deviceId);
-      const docs = await AnonymousNotification.find({ deviceId }).sort({ createdAt: -1 }).lean();
+      const docs = await AnonymousNotification.find({ deviceId }).sort({ createdAt: -1 });
       notifications = docs.map(d => d.toClient());
     }
 

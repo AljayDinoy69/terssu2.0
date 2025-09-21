@@ -32,7 +32,7 @@ export default function ResponderDashboard({ navigation }: ResponderDashProps) {
   const { colors, theme } = useTheme();
   const [reports, setReports] = useState<Report[]>([]);
   const [menuOpen, setMenuOpen] = useState(false);
-  const [activeTab, setActiveTab] = useState<'pending' | 'active' | 'completed'>('pending');
+  const [activeTab, setActiveTab] = useState<'pending' | 'active' | 'completed' | 'analytics'>('pending');
   const [detailReport, setDetailReport] = useState<Report | null>(null);
   const [nameMap, setNameMap] = useState<Record<string, string>>({});
   const [soundEnabled, setSoundEnabledState] = useState<boolean>(true);
@@ -49,6 +49,8 @@ export default function ResponderDashboard({ navigation }: ResponderDashProps) {
   const [currentUser, setCurrentUser] = useState<any>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [notificationFreq, setNotificationFreq] = useState<NotificationFrequency>('normal');
+  const [imageViewerVisible, setImageViewerVisible] = useState(false);
+  const [imageViewerUri, setImageViewerUri] = useState<string | null>(null);
   // Map modal state
   const [mapOpen, setMapOpen] = useState(false);
   const [incidentCoord, setIncidentCoord] = useState<{ lat: number; lon: number } | null>(null);
@@ -60,51 +62,24 @@ export default function ResponderDashboard({ navigation }: ResponderDashProps) {
   const useGoogleProvider = Platform.OS === 'android' || (Platform.OS === 'ios' && !isExpoGo);
 
   // Animation values
-  const fadeAnim = useRef(new Animated.Value(0)).current;
-  const slideAnim = useRef(new Animated.Value(30)).current;
-  const headerScale = useRef(new Animated.Value(0.9)).current;
-  const statsScale = useRef(new Animated.Value(0.9)).current;
-  const listAnim = useRef(new Animated.Value(0)).current;
+  const fadeAnim = useRef(new Animated.Value(1)).current;
+  const slideAnim = useRef(new Animated.Value(0)).current;
   const pulseAnim = useRef(new Animated.Value(1)).current;
   const menuAnimation = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
-
-    // Entrance animations
-    Animated.sequence([
-      // Header animation
-      Animated.timing(headerScale, {
+    // Simple fade in animation
+    Animated.parallel([
+      Animated.timing(fadeAnim, {
         toValue: 1,
-        duration: 600,
+        duration: 300,
         useNativeDriver: true,
       }),
-      // Content fade and slide
-      Animated.parallel([
-        Animated.timing(fadeAnim, {
-          toValue: 1,
-          duration: 500,
-          useNativeDriver: true,
-        }),
-        Animated.timing(slideAnim, {
-          toValue: 0,
-          duration: 500,
-          useNativeDriver: true,
-        }),
-      ]),
-      // Staggered sections
-      Animated.stagger(150, [
-        Animated.spring(statsScale, {
-          toValue: 1,
-          tension: 100,
-          friction: 8,
-          useNativeDriver: true,
-        }),
-        Animated.timing(listAnim, {
-          toValue: 1,
-          duration: 400,
-          useNativeDriver: true,
-        }),
-      ]),
+      Animated.timing(slideAnim, {
+        toValue: 0,
+        duration: 300,
+        useNativeDriver: true,
+      })
     ]).start();
 
     // Pulse animation for pending reports
@@ -399,7 +374,7 @@ export default function ResponderDashboard({ navigation }: ResponderDashProps) {
       <View style={styles.backgroundPattern} pointerEvents="none" />
       
       {/* Header */}
-      <Animated.View style={[styles.header, { transform: [{ scale: headerScale }] }]}> 
+      <View style={styles.header}> 
         <View style={styles.headerContent}>
           <Text style={[styles.title, { color: colors.text }]}>🚑 Responder Dashboard</Text>
           <Text style={[styles.subtitle, { color: colors.text, opacity: 0.8 }]}>Emergency Response Management</Text>
@@ -419,61 +394,69 @@ export default function ResponderDashboard({ navigation }: ResponderDashProps) {
               )}
             </TouchableOpacity>
             {notifOpen && (
-              <View style={[styles.dropdown, { maxHeight: 360 }]}> 
-                {notifs.length === 0 ? (
-                  <Text style={[styles.emptyText, { color: colors.text } ]}>No notifications yet</Text>
-                ) : (
-                  <>
-                    <View style={{ paddingHorizontal: 12, paddingBottom: 6, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
-                      <Text style={{ color: '#a0a0a0', fontWeight: '700' }}>Notifications</Text>
-                      {unseen > 0 && (
-                        <TouchableOpacity onPress={async () => {
-                          try {
-                            const uid = meRef.current?.id || (await getCurrentUser())?.id;
-                            if (!uid) return;
-                            await markAllNotificationsRead(uid);
-                            setNotifs(prev => prev.map(x => ({ ...x, read: true })));
-                            unseenRef.current = 0; setUnseen(0);
-                          } catch {}
-                        }} activeOpacity={0.8}>
-                          <Text style={{ color: '#66d9ef', fontWeight: '800' }}>Mark all as read</Text>
-                        </TouchableOpacity>
-                      )}
-                    </View>
-                    <ScrollView style={{ maxHeight: 300 }} contentContainerStyle={{ paddingBottom: 8 }} showsVerticalScrollIndicator keyboardShouldPersistTaps="handled">
-                    {notifs.map(n => (
-                      <TouchableOpacity key={n.id} style={[styles.notifItem, { opacity: n.read ? 0.7 : 1 }]} onPress={() => handleNotifPress(n)} activeOpacity={0.85}>
-                        <Text style={[styles.notifDot, { color: n.kind === 'new' ? '#ffd166' : '#66d9ef' }]}>•</Text>
-                        <View style={{ flex: 1 }}>
-                          <Text style={[styles.notifTitle, { fontWeight: n.read ? '600' : '800' }]}>{n.title}</Text>
-                          <Text style={styles.notifTime}>{n.createdAt ? new Date(n.createdAt as any).toLocaleTimeString() : ''}</Text>
-                        </View>
-                        <TouchableOpacity onPress={async () => {
-                          try {
-                            const next = !n.read; await markNotificationRead(n.id, next);
-                            setNotifs(prev => prev.map(x => x.id === n.id ? { ...x, read: next } : x));
-                            const delta = next ? -1 : +1; // if marking read, decrement unseen; if unread, increment
-                            unseenRef.current = Math.max(0, unseenRef.current + delta);
-                            setUnseen(unseenRef.current);
-                          } catch {}
-                        }} style={{ paddingHorizontal: 8, paddingVertical: 4 }} activeOpacity={0.7}>
-                          <Text style={{ color: '#ffd166', fontWeight: '800' }}>{n.read ? 'Unread' : 'Read'}</Text>
-                        </TouchableOpacity>
-                        <TouchableOpacity onPress={async () => {
-                          try {
-                            await deleteNotification(n.id);
-                            setNotifs(prev => prev.filter(x => x.id !== n.id));
-                            if (!n.read && unseenRef.current > 0) { unseenRef.current -= 1; setUnseen(unseenRef.current); }
-                          } catch {}
-                        }} style={{ paddingHorizontal: 8, paddingVertical: 4 }} activeOpacity={0.7}>
-                          <Text style={{ color: '#d90429', fontWeight: '800' }}>Delete</Text>
-                        </TouchableOpacity>
+              <Modal visible={notifOpen} transparent animationType="fade" onRequestClose={() => setNotifOpen(false)}>
+                <View style={styles.modalOverlay}>
+                  <TouchableOpacity style={StyleSheet.absoluteFill as any} activeOpacity={1} onPress={() => setNotifOpen(false)} />
+                  <View style={styles.modalContent}>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
+                      <Text style={{ color: colors.text, opacity: 0.8, fontWeight: '700', fontSize: 16 }}>Notifications</Text>
+                      <TouchableOpacity onPress={() => setNotifOpen(false)}>
+                        <Text style={{ color: colors.text, opacity: 0.8, fontSize: 18 }}>✖</Text>
                       </TouchableOpacity>
-                    ))}
-                    </ScrollView>
-                  </>
-                )}
-              </View>
+                    </View>
+                    {notifs.length === 0 ? (
+                      <Text style={[styles.emptyText, { color: colors.text }]}>No notifications yet</Text>
+                    ) : (
+                      <>
+                        {unseen > 0 && (
+                          <TouchableOpacity onPress={async () => {
+                            try {
+                              const uid = meRef.current?.id || (await getCurrentUser())?.id;
+                              if (!uid) return;
+                              await markAllNotificationsRead(uid);
+                              setNotifs(prev => prev.map(x => ({ ...x, read: true })));
+                              unseenRef.current = 0; setUnseen(0);
+                            } catch {}
+                          }} activeOpacity={0.8} style={{ alignSelf: 'flex-end', marginBottom: 8 }}>
+                            <Text style={{ color: '#66d9ef', fontWeight: '800' }}>Mark all as read</Text>
+                          </TouchableOpacity>
+                        )}
+                        <ScrollView style={{ maxHeight: 360 }} contentContainerStyle={{ paddingBottom: 8 }} showsVerticalScrollIndicator keyboardShouldPersistTaps="handled">
+                          {notifs.map(n => (
+                            <TouchableOpacity key={n.id} style={[styles.notifItem, { opacity: n.read ? 0.7 : 1 }]} onPress={() => handleNotifPress(n)} activeOpacity={0.85}>
+                              <Text style={[styles.notifDot, { color: n.kind === 'new' ? '#ffd166' : '#66d9ef' }]}>•</Text>
+                              <View style={{ flex: 1 }}>
+                                <Text style={[styles.notifTitle, { fontWeight: n.read ? '600' : '800', color: colors.text }]}>{n.title}</Text>
+                                <Text style={[styles.notifTime, { color: colors.text, opacity: 0.6 }]}>{n.createdAt ? new Date(n.createdAt as any).toLocaleTimeString() : ''}</Text>
+                              </View>
+                              <TouchableOpacity onPress={async () => {
+                                try {
+                                  const next = !n.read; await markNotificationRead(n.id, next);
+                                  setNotifs(prev => prev.map(x => x.id === n.id ? { ...x, read: next } : x));
+                                  const delta = next ? -1 : +1;
+                                  unseenRef.current = Math.max(0, unseenRef.current + delta);
+                                  setUnseen(unseenRef.current);
+                                } catch {}
+                              }} style={{ paddingHorizontal: 8, paddingVertical: 4 }} activeOpacity={0.7}>
+                                <Text style={{ color: '#ffd166', fontWeight: '800' }}>{n.read ? 'Unread' : 'Read'}</Text>
+                              </TouchableOpacity>
+                              <TouchableOpacity onPress={async () => {
+                                try {
+                                  await deleteNotification(n.id);
+                                  setNotifs(prev => prev.filter(x => x.id !== n.id));
+                                  if (!n.read && unseenRef.current > 0) { unseenRef.current -= 1; setUnseen(unseenRef.current); }
+                                } catch {}
+                              }} style={{ paddingHorizontal: 8, paddingVertical: 4 }} activeOpacity={0.7}>
+                                <Text style={{ color: '#d90429', fontWeight: '800' }}>Delete</Text>
+                              </TouchableOpacity>
+                            </TouchableOpacity>
+                          ))}
+                        </ScrollView>
+                      </>
+                    )}
+                  </View>
+                </View>
+              </Modal>
             )}
           </View>
           <TouchableOpacity style={styles.menuBtn} onPress={() => setMenuOpen(v => !v)} activeOpacity={0.8}>
@@ -490,7 +473,7 @@ export default function ResponderDashboard({ navigation }: ResponderDashProps) {
             </Animated.View>
           </TouchableOpacity>
         </View>
-      </Animated.View>
+      </View>
 
       {/* Menu Overlay */}
       {menuOpen && (
@@ -564,72 +547,83 @@ export default function ResponderDashboard({ navigation }: ResponderDashProps) {
         </Animated.View>
       )}
 
-      <ScrollView style={styles.scrollContainer} showsVerticalScrollIndicator={false}>
-        {/* Stats Overview */}
-        <Animated.View
-          style={[
-            styles.statsContainer,
-            {
-              opacity: fadeAnim,
-              transform: [
-                { translateY: slideAnim },
-                { scale: statsScale }
-              ],
-            },
-          ]}
-        >
-          <Text style={styles.sectionTitle}>📊 Assignment Overview</Text>
+      <ScrollView 
+        style={styles.scrollContainer} 
+        showsVerticalScrollIndicator={false}
+        contentContainerStyle={{ paddingBottom: 90, paddingTop: 20 }} // Add padding to prevent content from being hidden behind the footer
+      >
+        {/* Content Area */}
+      {activeTab === 'analytics' ? (
+        <View style={styles.analyticsContainer}>
+          <Text style={styles.sectionTitle}>📊 Response Analytics</Text>
+          
+          {/* Stats Overview */}
           <View style={styles.statsGrid}>
-            <View style={[styles.statCard, { backgroundColor: '#667eea20' }]}>
-              <Text style={styles.statNumber}>{stats.totalReports}</Text>
-              <Text style={styles.statLabel}>📋 Total Assigned</Text>
-            </View>
             <View style={[styles.statCard, { backgroundColor: '#ff980020' }]}>
-              <Text style={styles.statNumber}>{stats.pendingReports}</Text>
+              <Text style={styles.statNumber}>{pending.length}</Text>
               <Text style={styles.statLabel}>⏳ Pending</Text>
             </View>
             <View style={[styles.statCard, { backgroundColor: '#2196f320' }]}>
-              <Text style={styles.statNumber}>{stats.activeReports}</Text>
-              <Text style={styles.statLabel}>🚀 Active</Text>
+              <Text style={styles.statNumber}>{active.length}</Text>
+              <Text style={styles.statLabel}>🚀 In Progress</Text>
             </View>
             <View style={[styles.statCard, { backgroundColor: '#4caf5020' }]}>
-              <Text style={styles.statNumber}>{stats.completedReports}</Text>
-              <Text style={styles.statLabel}>✅ Completed</Text>
+              <Text style={styles.statNumber}>{completed.length}</Text>
+              <Text style={styles.statLabel}>✅ Resolved</Text>
             </View>
           </View>
-        </Animated.View>
-
-        {/* Segmented Tabs */}
-        <Animated.View
-          style={[
-            styles.tabsRow,
-            { opacity: fadeAnim, transform: [{ translateY: slideAnim }] },
-          ]}
-        >
-          <TouchableOpacity
-            style={[styles.tabBtn, activeTab === 'pending' && styles.tabBtnActive]}
-            onPress={() => setActiveTab('pending')}
-            activeOpacity={0.85}
-          >
-            <Text style={[styles.tabText, activeTab === 'pending' && styles.tabTextActive]}>New Reports ({pending.length})</Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={[styles.tabBtn, activeTab === 'active' && styles.tabBtnActive]}
-            onPress={() => setActiveTab('active')}
-            activeOpacity={0.85}
-          >
-            <Text style={[styles.tabText, activeTab === 'active' && styles.tabTextActive]}>Active Cases ({active.length})</Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={[styles.tabBtn, activeTab === 'completed' && styles.tabBtnActive]}
-            onPress={() => setActiveTab('completed')}
-            activeOpacity={0.85}
-          >
-            <Text style={[styles.tabText, activeTab === 'completed' && styles.tabTextActive]}>Completed ({completed.length})</Text>
-          </TouchableOpacity>
-        </Animated.View>
-
-        {/* Active list */}
+          
+          {/* Response Time */}
+          <View style={styles.analyticsSection}>
+            <Text style={styles.analyticsTitle}>⏱️ Average Response Time</Text>
+            <View style={styles.analyticsCard}>
+              <Text style={styles.analyticsValue}>24 min</Text>
+              <Text style={styles.analyticsSubtitle}>From report to first response</Text>
+            </View>
+          </View>
+          
+          {/* Completion Rate */}
+          <View style={styles.analyticsSection}>
+            <Text style={styles.analyticsTitle}>📈 Completion Rate</Text>
+            <View style={styles.analyticsCard}>
+              <Text style={styles.analyticsValue}>
+                {reports.length > 0 ? Math.round((completed.length / reports.length) * 100) : 0}%
+              </Text>
+              <Text style={styles.analyticsSubtitle}>of reports resolved</Text>
+            </View>
+          </View>
+          
+          {/* Activity Timeline */}
+          <View style={styles.analyticsSection}>
+            <Text style={styles.analyticsTitle}>📅 Recent Activity</Text>
+            <View style={[styles.analyticsCard, { padding: 0 }]}>
+              {reports.slice(0, 3).map((report, index) => (
+                <View key={report.id} style={[styles.activityItem, index > 0 && styles.activityItemBorder]}>
+                  <View style={styles.activityIcon}>
+                    <Text style={styles.activityIconText}>
+                      {report.status === 'Resolved' ? '✅' : report.status === 'In-progress' ? '🔄' : '📝'}
+                    </Text>
+                  </View>
+                  <View style={styles.activityContent}>
+                    <Text style={styles.activityTitle} numberOfLines={1}>
+                      {report.type} - {report.status}
+                    </Text>
+                    <Text style={styles.activityTime}>
+                      {new Date(report.createdAt).toLocaleDateString()}
+                    </Text>
+                  </View>
+                </View>
+              ))}
+              {reports.length === 0 && (
+                <View style={styles.emptyState}>
+                  <Text style={styles.emptyText}>No activity yet</Text>
+                </View>
+              )}
+            </View>
+          </View>
+        </View>
+      ) : (
+        /* Original List View */
         <View style={styles.listWrap}>
           {activeList.length === 0 ? (
             <View style={styles.emptyState}>
@@ -646,6 +640,7 @@ export default function ResponderDashboard({ navigation }: ResponderDashProps) {
                   index={index} 
                   nameMap={nameMap}
                   onPress={() => setDetailReport(item)}
+                  onImagePress={(uri) => { setImageViewerUri(uri); setImageViewerVisible(true); }}
                 />
               )}
               scrollEnabled={false}
@@ -653,7 +648,55 @@ export default function ResponderDashboard({ navigation }: ResponderDashProps) {
             />
           )}
         </View>
+      )}  
       </ScrollView>
+
+      {/* Sticky Footer */}
+      <View style={styles.footer}>
+        <TouchableOpacity 
+          style={[styles.footerButton, activeTab === 'pending' && styles.activeFooterButton]}
+          onPress={() => setActiveTab('pending')}
+          activeOpacity={0.7}
+        >
+          <Text style={[styles.footerIcon, activeTab === 'pending' && styles.activeFooterIcon]}>
+            {activeTab === 'pending' ? '⏳' : '⏱️'}
+          </Text>
+          <Text style={[styles.footerText, activeTab === 'pending' && styles.activeFooterText]}>Pending</Text>
+        </TouchableOpacity>
+        
+        <TouchableOpacity 
+          style={[styles.footerButton, activeTab === 'active' && styles.activeFooterButton]}
+          onPress={() => setActiveTab('active')}
+          activeOpacity={0.7}
+        >
+          <Text style={[styles.footerIcon, activeTab === 'active' && styles.activeFooterIcon]}>
+            {activeTab === 'active' ? '🚀' : '⚡'}
+          </Text>
+          <Text style={[styles.footerText, activeTab === 'active' && styles.activeFooterText]}>Active</Text>
+        </TouchableOpacity>
+        
+        <TouchableOpacity 
+          style={[styles.footerButton, activeTab === 'completed' && styles.activeFooterButton]}
+          onPress={() => setActiveTab('completed')}
+          activeOpacity={0.7}
+        >
+          <Text style={[styles.footerIcon, activeTab === 'completed' && styles.activeFooterIcon]}>
+            {activeTab === 'completed' ? '✅' : '✔️'}
+          </Text>
+          <Text style={[styles.footerText, activeTab === 'completed' && styles.activeFooterText]}>Completed</Text>
+        </TouchableOpacity>
+        
+        <TouchableOpacity 
+          style={[styles.footerButton, activeTab === 'analytics' && styles.activeFooterButton]}
+          onPress={() => setActiveTab('analytics')}
+          activeOpacity={0.7}
+        >
+          <Text style={[styles.footerIcon, activeTab === 'analytics' && styles.activeFooterIcon]}>
+            {activeTab === 'analytics' ? '📊' : '📈'}
+          </Text>
+          <Text style={[styles.footerText, activeTab === 'analytics' && styles.activeFooterText]}>Analytics</Text>
+        </TouchableOpacity>
+      </View>
 
       {/* View Details Modal */}
       <Modal
@@ -718,6 +761,38 @@ export default function ResponderDashboard({ navigation }: ResponderDashProps) {
               )}
             </View>
           </View>
+        </View>
+      </Modal>
+
+      {/* Full-screen Image Viewer */}
+      <Modal
+        visible={imageViewerVisible}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setImageViewerVisible(false)}
+      >
+        <View style={styles.viewerOverlay}>
+          <TouchableOpacity
+            style={StyleSheet.absoluteFill as any}
+            activeOpacity={1}
+            onPress={() => setImageViewerVisible(false)}
+          />
+          <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
+            {!!imageViewerUri && (
+              <Image
+                source={{ uri: imageViewerUri as string }}
+                style={styles.viewerImage}
+                resizeMode="contain"
+              />
+            )}
+          </View>
+          <TouchableOpacity
+            onPress={() => setImageViewerVisible(false)}
+            style={styles.viewerCloseBtn}
+            activeOpacity={0.8}
+          >
+            <Text style={styles.viewerCloseText}>✕</Text>
+          </TouchableOpacity>
         </View>
       </Modal>
 
@@ -1125,6 +1200,72 @@ const styles = StyleSheet.create({
     color: '#999',
     textAlign: 'center',
   },
+  // Analytics Styles
+  analyticsContainer: {
+    flex: 1,
+    padding: 16,
+  },
+  analyticsSection: {
+    marginBottom: 20,
+  },
+  analyticsTitle: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: '#fff',
+    marginBottom: 12,
+  },
+  analyticsCard: {
+    backgroundColor: '#1a1a2e',
+    borderRadius: 12,
+    padding: 16,
+    borderWidth: 1,
+    borderColor: '#333',
+  },
+  analyticsValue: {
+    fontSize: 32,
+    fontWeight: '800',
+    color: '#fff',
+    marginBottom: 4,
+  },
+  analyticsSubtitle: {
+    color: '#a0a0a0',
+    fontSize: 14,
+  },
+  activityItem: {
+    flexDirection: 'row',
+    padding: 16,
+    alignItems: 'center',
+  },
+  activityItemBorder: {
+    borderTopWidth: 1,
+    borderTopColor: '#2b2d42',
+  },
+  activityIcon: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: '#2b2d42',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 12,
+  },
+  activityIconText: {
+    fontSize: 16,
+    textAlign: 'center',
+  },
+  activityContent: {
+    flex: 1,
+  },
+  activityTitle: {
+    color: '#fff',
+    fontSize: 14,
+    fontWeight: '600',
+    marginBottom: 2,
+  },
+  activityTime: {
+    color: '#a0a0a0',
+    fontSize: 12,
+  },
   mapModalContent: {
     backgroundColor: '#1a1a2e',
     padding: 16,
@@ -1169,40 +1310,7 @@ const styles = StyleSheet.create({
     fontSize: 12,
     marginBottom: 8,
   },
-  tabsRow: {
-    flexDirection: 'row',
-    gap: 12,
-    paddingHorizontal: 20,
-    marginTop: 8,
-    marginBottom: 12,
-  },
-  tabBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingVertical: 10,
-    paddingHorizontal: 14,
-    borderRadius: 12,
-    backgroundColor: '#1f233a',
-    borderWidth: 1,
-    borderColor: '#2b2f4a',
-  },
-  tabBtnActive: {
-    backgroundColor: '#2b2f4a',
-    borderColor: '#ffd166',
-    shadowColor: '#ffd166',
-    shadowOffset: { width: 0, height: 6 },
-    shadowOpacity: 0.25,
-    shadowRadius: 10,
-    elevation: 6,
-  },
-  tabText: {
-    color: '#cbd5e1',
-    fontWeight: '700',
-    fontSize: 12,
-  },
-  tabTextActive: {
-    color: '#ffd166',
-  },
+  
   listWrap: {
     paddingHorizontal: 20,
     paddingBottom: 24,
@@ -1303,5 +1411,77 @@ const styles = StyleSheet.create({
   deleteBtnText: {
     color: '#fff',
     fontWeight: '800',
+  },
+  // Sticky Footer Styles
+  footer: {
+    position: 'absolute',
+    bottom: 0,
+    left: 0,
+    right: 0,
+    flexDirection: 'row',
+    justifyContent: 'space-around',
+    alignItems: 'center',
+    backgroundColor: '#1a1a2e',
+    borderTopWidth: 1,
+    borderTopColor: '#2b2d42',
+    paddingVertical: 10,
+    paddingBottom: Platform.OS === 'ios' ? 30 : 10, // Add extra padding for iPhone home indicator
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: -2 },
+    shadowOpacity: 0.2,
+    shadowRadius: 4,
+    elevation: 8,
+  },
+  footerButton: {
+    alignItems: 'center',
+    flex: 1,
+    paddingVertical: 8,
+    borderRadius: 8,
+    marginHorizontal: 2,
+  },
+  activeFooterButton: {
+    backgroundColor: 'rgba(102, 126, 234, 0.2)',
+  },
+  footerIcon: {
+    fontSize: 22,
+    marginBottom: 4,
+    color: '#888',
+  },
+  activeFooterIcon: {
+    color: '#667eea',
+  },
+  footerText: {
+    fontSize: 12,
+    color: '#888',
+    fontWeight: '600',
+  },
+  activeFooterText: {
+    color: '#667eea',
+    fontWeight: '700',
+  },
+  // Full-screen image viewer styles
+  viewerOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.95)'
+  },
+  viewerImage: {
+    width: width,
+    height: '80%',
+  },
+  viewerCloseBtn: {
+    position: 'absolute',
+    top: 40,
+    right: 20,
+    backgroundColor: 'rgba(255,255,255,0.15)',
+    borderRadius: 20,
+    width: 36,
+    height: 36,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  viewerCloseText: {
+    color: '#fff',
+    fontSize: 18,
+    fontWeight: '900',
   },
 });

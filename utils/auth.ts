@@ -197,11 +197,38 @@ export async function getMyProfile(email: string, password: string) {
 }
 
 export async function updateMyProfile(
-  email: string,
-  password: string,
-  updates: { name?: string; phone?: string; photoUrl?: string; avatarUrl?: string }
+  authEmail: string = '',
+  authPassword: string = '',
+  updates: { id?: string; name?: string; phone?: string; photoUrl?: string; avatarUrl?: string; email?: string; password?: string }
 ) {
-  const { user } = await api.patch<{ user: Account }>('/auth/me', { email, password, ...updates });
+  // Prepare payload with updates
+  const payload: any = { ...updates };
+
+  // Provide authentication credentials if supplied
+  if (authEmail && authPassword) {
+    payload.authEmail = authEmail;
+    payload.authPassword = authPassword;
+  }
+
+  // Map potential sensitive fields to server's expected keys
+  if (payload.email) {
+    payload.newEmail = payload.email;
+    delete payload.email;
+  }
+  if (payload.password) {
+    payload.newPassword = payload.password;
+    delete payload.password;
+  }
+
+  // id is used by server to locate user for non-sensitive updates
+  if (payload.id === undefined) {
+    try {
+      const me = await getCurrentUser();
+      if (me?.id) payload.id = me.id;
+    } catch {}
+  }
+
+  const { user } = await api.patch<{ user: Account }>('/auth/me', payload);
   return user;
 }
 
