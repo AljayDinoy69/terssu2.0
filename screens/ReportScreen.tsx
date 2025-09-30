@@ -16,7 +16,7 @@ export default function ReportScreen({ navigation, route }: ReportProps) {
   // Removed incidentType per request
   const [description, setDescription] = useState(''); // optional
   const [locationText, setLocationText] = useState('');
-  const [photoUri, setPhotoUri] = useState<string | undefined>();
+  const [photos, setPhotos] = useState<string[]>([]);
   const [selectedResponderIds, setSelectedResponderIds] = useState<string[]>([]);
   const [responders, setResponders] = useState<{ id: string; name: string }[]>([]);
   const [loading, setLoading] = useState(false);
@@ -143,7 +143,8 @@ export default function ReportScreen({ navigation, route }: ReportProps) {
 
   // Photo animation
   useEffect(() => {
-    if (photoUri) {
+    const lastPhoto = photos[photos.length - 1];
+    if (lastPhoto) {
       Animated.spring(photoScale, {
         toValue: 1,
         tension: 100,
@@ -153,7 +154,7 @@ export default function ReportScreen({ navigation, route }: ReportProps) {
     } else {
       photoScale.setValue(0);
     }
-  }, [photoUri]);
+  }, [photos]);
 
   useEffect(() => {
     (async () => {
@@ -178,13 +179,29 @@ export default function ReportScreen({ navigation, route }: ReportProps) {
   }, []);
 
   const captureImage = async () => {
-    const perm = await ImagePicker.requestCameraPermissionsAsync();
-    if (perm.status !== 'granted') {
-      Alert.alert('Permission needed', 'Camera permission is required to capture a photo.');
-      return;
+    try {
+      const perm = await ImagePicker.requestCameraPermissionsAsync();
+      if (perm.status !== 'granted') {
+        Alert.alert('Permission needed', 'Camera permission is required to capture photos.');
+        return;
+      }
+      const res = await ImagePicker.launchCameraAsync({ 
+        allowsEditing: false, 
+        quality: 0.7,
+        allowsMultipleSelection: false
+      });
+      
+      if (!res.canceled && res.assets && res.assets.length > 0) {
+        setPhotos(prev => [...prev, res.assets[0].uri]);
+      }
+    } catch (error) {
+      console.error('Error capturing image:', error);
+      Alert.alert('Error', 'Failed to capture image. Please try again.');
     }
-    const res = await ImagePicker.launchCameraAsync({ allowsEditing: true, quality: 0.8 });
-    if (!res.canceled) setPhotoUri(res.assets[0].uri);
+  };
+
+  const removePhoto = (index: number) => {
+    setPhotos(prev => prev.filter((_, i) => i !== index));
   };
 
   const onSubmit = async () => {
@@ -204,6 +221,11 @@ export default function ReportScreen({ navigation, route }: ReportProps) {
 
     if (!chiefComplaint || !contactNo || !personsInvolved || !locationText || selectedResponderIds.length === 0) {
       return Alert.alert('Missing fields', 'Please complete all required fields');
+    }
+    
+    // Check if at least one photo is provided
+    if (photos.length === 0) {
+      return Alert.alert('Photos Required', 'Please capture at least one photo before submitting the report');
     }
     try {
       setLoading(true);
@@ -227,23 +249,33 @@ export default function ReportScreen({ navigation, route }: ReportProps) {
         }
       }
       
-      let photoUrl: string | undefined;
-      if (photoUri) {
+      // Upload all photos and get their URLs
+      const uploadedPhotos = [];
+      for (const photoUri of photos) {
         try {
           const uploaded = await uploadImage(photoUri);
-          photoUrl = uploaded.url;
+          uploadedPhotos.push(uploaded.url);
         } catch (err: any) {
-          // If upload fails, proceed without photo but notify user
-          Alert.alert('Photo upload failed', err?.message || 'Unable to upload image. The report will be submitted without a photo.');
+          console.error('Failed to upload photo:', err);
+          // Continue with other photos even if one fails
         }
       }
+      
+      if (uploadedPhotos.length === 0) {
+        Alert.alert('Warning', 'Could not upload any photos. Please try again.');
+        return;
+      }
+      
+      // Use the first photo as the main photo for backward compatibility
+      const photoUrl = uploadedPhotos[0];
+
       // Create one report per selected responder (server supports single responderId per report)
       await Promise.all(
         selectedResponderIds.map((rid) =>
           createReport({
             // Server requires 'type'; use selected chief complaint as the type
             type: chiefComplaint || 'Emergency',
-            description, // optional
+            description: description || 'None', // Set to 'None' if empty
             location: locationText,
             photoUrl, // preferred; server also maps legacy photoUri
             responderId: rid,
@@ -530,25 +562,34 @@ export default function ReportScreen({ navigation, route }: ReportProps) {
           {/* Photo Upload */}
           <Animated.View style={{ transform: [{ scale: inputAnimations[7] }] }}>
             <View style={styles.photoContainer}>
+              <Text style={styles.inputLabel}>📷 Evidence Photos (Required)</Text>
               <TouchableOpacity 
                 style={styles.photoButton} 
                 onPress={captureImage}
                 activeOpacity={0.8}
               >
-                <Text style={styles.photoButtonText}>📷 Capture Photo</Text>
-                <Text style={styles.photoButtonSubtext}>Optional evidence (real-time)</Text>
+                <Text style={styles.photoButtonText}>📸 Add Photo</Text>
+                <Text style={styles.photoButtonSubtext}>Tap to capture more photos</Text>
               </TouchableOpacity>
               
-              {photoUri && (
-                <Animated.View style={[styles.photoPreview, { transform: [{ scale: photoScale }] }]}>
-                  <Image source={{ uri: photoUri }} style={styles.photoImage} />
-                  <TouchableOpacity 
-                    style={styles.photoRemove}
-                    onPress={() => setPhotoUri(undefined)}
+              <View style={styles.photosGrid}>
+                {photos.map((uri, index) => (
+                  <Animated.View 
+                    key={`${uri}-${index}`} 
+                    style={[styles.photoPreview, { transform: [{ scale: photoScale }] }]}
                   >
-                    <Text style={styles.photoRemoveText}>✕</Text>
-                  </TouchableOpacity>
-                </Animated.View>
+                    <Image source={{ uri }} style={styles.photoImage} />
+                    <TouchableOpacity 
+                      style={styles.photoRemove}
+                      onPress={() => removePhoto(index)}
+                    >
+                      <Text style={styles.photoRemoveText}>✕</Text>
+                    </TouchableOpacity>
+                  </Animated.View>
+                ))}
+              </View>
+              {photos.length === 0 && (
+                <Text style={styles.photoHint}>Please capture at least one photo</Text>
               )}
             </View>
           </Animated.View>
@@ -560,7 +601,7 @@ export default function ReportScreen({ navigation, route }: ReportProps) {
             style={[
               styles.submitBtn,
               loading && styles.submitBtnDisabled,
-              (chiefComplaint && contactNo && personsInvolved && locationText && selectedResponderIds.length > 0) && styles.submitBtnReady
+              (chiefComplaint && contactNo && personsInvolved && locationText && selectedResponderIds.length > 0 && photos.length > 0) && styles.submitBtnReady
             ]}
             onPress={onSubmit}
             disabled={loading}
@@ -570,7 +611,7 @@ export default function ReportScreen({ navigation, route }: ReportProps) {
               <Text style={styles.submitBtnText}>
                 {loading ? '📤 Submitting Report...' : '🚀 Submit Emergency Report'}
               </Text>
-              {!loading && (chiefComplaint && contactNo && personsInvolved && locationText && selectedResponderIds.length > 0) && (
+              {!loading && (chiefComplaint && contactNo && personsInvolved && locationText && selectedResponderIds.length > 0 && photos.length > 0) && (
                 <View style={styles.buttonGlow} />
               )}
             </View>
@@ -730,6 +771,19 @@ const styles = StyleSheet.create({
   },
   photoContainer: {
     marginBottom: 20,
+    width: '100%',
+  },
+  photosGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    marginTop: 10,
+    gap: 10,
+  },
+  photoHint: {
+    color: '#ff6b6b',
+    fontSize: 12,
+    marginTop: 5,
+    textAlign: 'center',
   },
   photoButton: {
     borderWidth: 2,

@@ -30,7 +30,7 @@
       }
     },
     "web": {
-      "favicon": "./assets/favicon.png"
+      "favicon": "./assets/icon.png"
     },
     "extra": {
       "googleMapsApiKey": "AIzaSyCS8cQ-4hmFl0Lk3Z9vCngxFizTQEGGwEQ"

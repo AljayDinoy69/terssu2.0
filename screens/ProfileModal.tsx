@@ -19,6 +19,63 @@ import { EditProfile } from '../components/EditProfile';
 export const AboutServicesModal = ({ visible, onClose }: { visible: boolean; onClose: () => void }) => {
   const [fadeAnim] = useState(new Animated.Value(0));
   const [scaleAnim] = useState(new Animated.Value(0.9));
+  const [content, setContent] = useState({
+    about: "Terssu is a comprehensive emergency response platform designed to connect users with immediate assistance during critical situations. Our mission is to create safer communities through real-time communication and rapid response coordination.",
+    features: [
+      { 
+        icon: 'alert-circle', 
+        title: 'Emergency Alerts',
+        description: 'Instant notifications about emergencies in your area with detailed information and safety instructions.'
+      },
+      { 
+        icon: 'location', 
+        title: 'Real-time Location Sharing',
+        description: 'Share your precise location with emergency services and trusted contacts when every second counts.'
+      },
+      { 
+        icon: 'people', 
+        title: 'Community Safety Network',
+        description: 'Connect with verified community responders and emergency services in your vicinity.'
+      },
+      { 
+        icon: 'notifications', 
+        title: 'Instant Notifications',
+        description: 'Receive critical updates and safety alerts based on your location and preferences.'
+      },
+      {
+        icon: 'shield-checkmark',
+        title: 'Verified Responders',
+        description: 'Connect with certified emergency personnel and community first responders.'
+      },
+      {
+        icon: 'document-text',
+        title: 'Incident Reporting',
+        description: 'Quickly report emergencies with photos, descriptions, and location data.'
+      }
+    ],
+    contact: {
+      emergency: {
+        text: 'For emergencies, please call:',
+        number: '911 or your local emergency number'
+      },
+      support: {
+        text: 'For app support, please contact:',
+        email: 'support@terssu-emergency.com',
+        phone: '+1 (800) 123-4567',
+        hours: 'Available 24/7'
+      },
+      social: {
+        text: 'Follow us on:',
+        platforms: [
+          { name: 'Twitter', handle: '@terssu_emergency' },
+          { name: 'Facebook', handle: '/terssuemergency' },
+          { name: 'Instagram', handle: '@terssu_emergency' }
+        ]
+      }
+    },
+    version: 'v2.0.1',
+    lastUpdated: 'September 2023'
+  });
 
   useEffect(() => {
     if (visible) {
@@ -48,7 +105,7 @@ export const AboutServicesModal = ({ visible, onClose }: { visible: boolean; onC
   return (
     <Modal
       transparent={true}
-      animationType="none"
+      animationType="fade"
       visible={visible}
       onRequestClose={onClose}
     >
@@ -65,56 +122,89 @@ export const AboutServicesModal = ({ visible, onClose }: { visible: boolean; onC
               styles.centeredModalContent,
               { 
                 opacity: fadeAnim,
-                transform: [{ scale: scaleAnim }] 
+                transform: [{ scale: scaleAnim }],
+                maxHeight: '80%',
+                width: '90%',
+                backgroundColor: '#fff',
+                borderRadius: 16,
+                padding: 20,
+                shadowColor: '#000',
+                shadowOffset: { width: 0, height: 2 },
+                shadowOpacity: 0.25,
+                shadowRadius: 10,
+                elevation: 5,
               }
             ]}
           >
-            <TouchableOpacity 
-              style={styles.closeButton} 
-              onPress={onClose}
-              hitSlop={{ top: 15, bottom: 15, left: 15, right: 15 }}
-            >
-              <Ionicons name="close" size={24} color="#666" />
-            </TouchableOpacity>
-            
-            <ScrollView style={styles.modalScroll}>
+            <View style={styles.modalHeader}>
               <Text style={styles.modalTitle}>About & Services</Text>
-              
+              <TouchableOpacity 
+                onPress={onClose}
+                style={styles.closeButton}
+                hitSlop={{ top: 15, bottom: 15, left: 15, right: 15 }}
+              >
+                <Ionicons name="close" size={24} color="#666" />
+              </TouchableOpacity>
+            </View>
+            
+            <ScrollView 
+              style={styles.modalScroll}
+              showsVerticalScrollIndicator={false}
+            >
               <View style={styles.section}>
-                <Text style={styles.sectionTitle}>About Our App</Text>
+                <Text style={styles.appLogo}>TERSSU</Text>
+                <Text style={styles.appTagline}>Your Partner in Emergency Response</Text>
                 <Text style={styles.sectionText}>
-                  Our emergency response app connects users with immediate assistance and provides real-time alerts for critical situations. We're committed to keeping communities safe and informed.
+                  {content.about}
                 </Text>
               </View>
               
               <View style={styles.section}>
-                <Text style={styles.sectionTitle}>Our Services</Text>
-                <View style={styles.serviceItem}>
-                  <Ionicons name="alert-circle" size={20} color="#007AFF" style={styles.serviceIcon} />
-                  <Text style={styles.serviceText}>Emergency Alerts</Text>
-                </View>
-                <View style={styles.serviceItem}>
-                  <Ionicons name="location" size={20} color="#007AFF" style={styles.serviceIcon} />
-                  <Text style={styles.serviceText}>Real-time Location Sharing</Text>
-                </View>
-                <View style={styles.serviceItem}>
-                  <Ionicons name="people" size={20} color="#007AFF" style={styles.serviceIcon} />
-                  <Text style={styles.serviceText}>Community Safety Network</Text>
-                </View>
-                <View style={styles.serviceItem}>
-                  <Ionicons name="notifications" size={20} color="#007AFF" style={styles.serviceIcon} />
-                  <Text style={styles.serviceText}>Instant Notifications</Text>
+                <Text style={styles.sectionTitle}>Key Features</Text>
+                <View style={styles.featuresGrid}>
+                  {content.features.map((feature, index) => (
+                    <View key={index} style={styles.featureCard}>
+                      <View style={styles.featureIconContainer}>
+                        <Ionicons 
+                          name={feature.icon as any} 
+                          size={24} 
+                          color="#007AFF"
+                        />
+                      </View>
+                      <Text style={styles.featureTitle}>{feature.title}</Text>
+                      <Text style={styles.featureDescription}>{feature.description}</Text>
+                    </View>
+                  ))}
                 </View>
               </View>
               
               <View style={styles.section}>
-                <Text style={styles.sectionTitle}>Contact Us</Text>
-                <Text style={styles.contactText}>
-                  For support or inquiries, please email us at:
-                </Text>
-                <Text style={[styles.contactText, { color: '#007AFF' }]}>
-                  support@emergencyresponse.com
-                </Text>
+                <Text style={styles.sectionTitle}>Emergency Contacts</Text>
+                <View style={styles.contactCard}>
+                  <Text style={styles.contactLabel}>For immediate emergencies:</Text>
+                  <Text style={styles.emergencyNumber}>{content.contact.emergency.number}</Text>
+                  
+                  <View style={styles.contactDivider} />
+                  
+                  <Text style={styles.contactLabel}>App Support:</Text>
+                  <Text style={styles.contactInfo}>{content.contact.support.email}</Text>
+                  <Text style={styles.contactInfo}>{content.contact.support.phone}</Text>
+                  <Text style={[styles.contactInfo, styles.hours]}>{content.contact.support.hours}</Text>
+                  
+                  <View style={styles.contactDivider} />
+                  
+                  <Text style={styles.contactLabel}>{content.contact.social.text}</Text>
+                  {content.contact.social.platforms.map((platform, i) => (
+                    <Text key={i} style={styles.socialLink}>
+                      {platform.name}: <Text style={styles.socialHandle}>{platform.handle}</Text>
+                    </Text>
+                  ))}
+                </View>
+              </View>
+              
+              <View style={[styles.section, styles.versionInfo]}>
+                <Text style={styles.versionText}>Terssu Emergency Response</Text>
+                <Text style={styles.versionText}>{content.version} • {content.lastUpdated}</Text>
               </View>
             </ScrollView>
           </Animated.View>
@@ -299,7 +389,7 @@ export default function ProfileModal({
           <View style={styles.headerContainer}>
             <Text style={styles.headerTitle}>Profile Settings</Text>
             <TouchableOpacity onPress={handleClose} style={styles.closeButton}>
-              <Ionicons name="close" size={24} color="#fff" />
+              <Ionicons name="close" size={24} color="#333" />
             </TouchableOpacity>
           </View>
           <ScrollView 
@@ -311,7 +401,7 @@ export default function ProfileModal({
                 user={user} 
                 onProfileUpdated={handleProfileUpdated} 
                 onClose={handleClose}
-                isModal={true}
+                isModal={false}
               />
             ) : (
               <View style={styles.profileContainer}>
@@ -389,8 +479,120 @@ const styles = StyleSheet.create({
     shadowRadius: 4,
     elevation: 5,
   },
+  modalHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 15,
+  },
   modalScroll: {
     flex: 1,
+    paddingHorizontal: 4,
+  },
+  appLogo: {
+    fontSize: 28,
+    fontWeight: 'bold',
+    color: '#007AFF',
+    textAlign: 'center',
+    marginBottom: 8,
+    letterSpacing: 1.5,
+  },
+  appTagline: {
+    fontSize: 16,
+    color: '#666',
+    textAlign: 'center',
+    marginBottom: 20,
+    fontStyle: 'italic',
+  },
+  featuresGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'space-between',
+    marginTop: 10,
+  },
+  featureCard: {
+    width: '48%',
+    backgroundColor: '#f8f9fa',
+    borderRadius: 12,
+    padding: 16,
+    marginBottom: 16,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.1,
+    shadowRadius: 3,
+    elevation: 2,
+  },
+  featureIconContainer: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: '#e6f2ff',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: 12,
+  },
+  featureTitle: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: '#333',
+    marginBottom: 6,
+  },
+  featureDescription: {
+    fontSize: 13,
+    color: '#666',
+    lineHeight: 18,
+  },
+  contactCard: {
+    backgroundColor: '#f8f9fa',
+    borderRadius: 12,
+    padding: 16,
+    marginTop: 8,
+  },
+  contactLabel: {
+    fontSize: 14,
+    color: '#666',
+    marginBottom: 8,
+    fontWeight: '500',
+  },
+  emergencyNumber: {
+    fontSize: 18,
+    color: '#e63946',
+    fontWeight: 'bold',
+    marginBottom: 16,
+  },
+  contactInfo: {
+    fontSize: 14,
+    color: '#333',
+    marginBottom: 6,
+  },
+  contactDivider: {
+    height: 1,
+    backgroundColor: '#e0e0e0',
+    marginVertical: 16,
+  },
+  hours: {
+    color: '#007AFF',
+    fontStyle: 'italic',
+  },
+  socialLink: {
+    fontSize: 14,
+    color: '#333',
+    marginBottom: 6,
+  },
+  socialHandle: {
+    color: '#007AFF',
+    fontWeight: '500',
+  },
+  versionInfo: {
+    alignItems: 'center',
+    marginTop: 8,
+    marginBottom: 16,
+  },
+  versionText: {
+    fontSize: 12,
+    color: '#999',
+    textAlign: 'center',
+    marginTop: 4,
   },
   modalTitle: {
     fontSize: 22,

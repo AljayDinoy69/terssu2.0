@@ -87,17 +87,19 @@ export default function UserDashboard({ navigation }: UserDashProps) {
     // Pulse animation for pending reports + sound trigger when count increases
     const pendingReports = reports.filter(r => r.status?.toLowerCase() === 'pending');
     const pendingCount = pendingReports.length;
-    if (!didInitRef.current) {
-      prevPendingRef.current = pendingCount;
-      didInitRef.current = true;
-    } else if (pendingCount > prevPendingRef.current) {
-      if (soundEnabled && notificationFreq !== 'off') {
-        playNotificationSound();
+    
+    // Skip sound on initial load
+    if (didInitRef.current) {
+      if (pendingCount > prevPendingRef.current) {
+        if (soundEnabled && notificationFreq !== 'off') {
+          playNotificationSound();
+        }
       }
-      prevPendingRef.current = pendingCount;
-    } else {
-      prevPendingRef.current = pendingCount;
     }
+    
+    // Update the previous count and mark as initialized
+    prevPendingRef.current = pendingCount;
+    didInitRef.current = true;
     if (pendingReports.length > 0) {
       const pulse = Animated.loop(
         Animated.sequence([
