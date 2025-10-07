@@ -1,8 +1,10 @@
 import { Audio } from 'expo-av';
-import { isSoundEnabled } from './settings';
+import { isSoundEnabled, getSelectedRingtoneKey } from './settings';
+import { getRingtoneByKey } from './ringtones';
 
 let sound: Audio.Sound | null = null;
 let prepared = false;
+let loadedKey: string | null = null;
 
 async function prepare() {
   if (prepared) return;
@@ -20,8 +22,10 @@ async function prepare() {
   if (!sound) {
     sound = new Audio.Sound();
     try {
-      // eslint-disable-next-line @typescript-eslint/no-var-requires
-      await sound.loadAsync(require('../assets/sounds/ring1.mp3'));
+      const key = await getSelectedRingtoneKey();
+      const rt = getRingtoneByKey(key);
+      await sound.loadAsync(rt.module as any);
+      loadedKey = key;
       prepared = true;
     } catch (e) {
       console.warn('Failed to load notification sound:', e);
@@ -29,6 +33,7 @@ async function prepare() {
       try { await sound.unloadAsync(); } catch {}
       sound = null;
       prepared = false;
+      loadedKey = null;
     }
   }
 }
@@ -37,6 +42,12 @@ export async function playNotificationSound() {
   try {
     const enabled = await isSoundEnabled();
     if (!enabled) return;
+    // Ensure correct ringtone is loaded
+    const key = await getSelectedRingtoneKey();
+    if (sound && loadedKey && loadedKey !== key) {
+      try { await sound.unloadAsync(); } catch {}
+      sound = null; prepared = false; loadedKey = null;
+    }
     await prepare();
     if (!sound) return;
     try { await sound.setPositionAsync(0); } catch {}
@@ -52,6 +63,7 @@ export async function unloadNotificationSound() {
       await sound.unloadAsync();
       sound = null;
       prepared = false;
+      loadedKey = null;
     }
   } catch {}
 }

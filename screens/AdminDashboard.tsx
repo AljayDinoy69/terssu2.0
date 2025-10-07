@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useRef } from 'react';
-import { View, Text, StyleSheet, FlatList, TouchableOpacity, TextInput, Alert, Animated, Dimensions, ScrollView, Image, Modal } from 'react-native';
+import { View, Text, StyleSheet, FlatList, TouchableOpacity, TextInput, Alert, Animated, Dimensions, ScrollView, Image, Modal, InteractionManager } from 'react-native';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { RootStackParamList } from '../navigation/AppNavigator';
 import { createResponder, deleteAccount, getCurrentUser, listAllReports, listUsers, logout, listNotifications, markNotificationRead, deleteNotification, markAllNotificationsRead, Notification as NotificationItem, listResponders } from '../utils/auth';
@@ -41,6 +41,7 @@ export default function AdminDashboard({ navigation }: AdminDashProps) {
   const unseenRef = useRef(0);
   const [unseen, setUnseen] = useState(0);
   const [detailReport, setDetailReport] = useState<any | null>(null);
+  const [detailVisible, setDetailVisible] = useState<boolean>(false);
   const [editProfile, setEditProfile] = useState<any | null>(null);
   const [profileForm, setProfileForm] = useState({
     name: '',
@@ -54,16 +55,80 @@ export default function AdminDashboard({ navigation }: AdminDashProps) {
   const [notificationFreq, setNotificationFreq] = useState<NotificationFrequency>('normal');
   const [imageViewerVisible, setImageViewerVisible] = useState(false);
   const [imageViewerUri, setImageViewerUri] = useState<string | null>(null);
+  const [imageViewerList, setImageViewerList] = useState<string[]>([]);
+  const [imageViewerIndex, setImageViewerIndex] = useState<number>(0);
+  // Track which URIs we have already prefetched to avoid duplicate requests
+  const prefetchedRef = useRef<Set<string>>(new Set());
 
+  const prefetchUris = async (uris: string[] | null | undefined) => {
+    if (!uris || uris.length === 0) return;
+    const unique = uris.filter((u) => !!u && !prefetchedRef.current.has(u));
+    if (unique.length === 0) return;
+    try {
+      await Promise.allSettled(unique.map((u) => Image.prefetch(u)));
+      unique.forEach((u) => prefetchedRef.current.add(u));
+    } catch {}
+  };
+  
+  const openImageViewer = (images: string[] | string, startIndex: number = 0) => {
+    if (Array.isArray(images)) {
+      if (images.length === 0) return;
+      const idx = Math.max(0, Math.min(startIndex, images.length - 1));
+      // Prefetch current and adjacent images for faster swiping
+      const neighbors: string[] = [images[idx], images[(idx - 1 + images.length) % images.length], images[(idx + 1) % images.length]];
+      prefetchUris(neighbors);
+      setImageViewerList(images);
+      setImageViewerIndex(idx);
+      setImageViewerUri(images[idx]);
+    } else if (images) {
+      prefetchUris([images]);
+      setImageViewerList([images]);
+      setImageViewerIndex(0);
+      setImageViewerUri(images);
+    }
+    setImageViewerVisible(true);
+  };
+  
+  const showPrevImage = () => {
+    if (imageViewerList.length <= 1) return;
+    const next = (imageViewerIndex - 1 + imageViewerList.length) % imageViewerList.length;
+    setImageViewerIndex(next);
+    setImageViewerUri(imageViewerList[next]);
+  };
+
+  // Ensure Report Details modal reliably opens, even after rapid taps/animations
+  const openReportDetails = (report: any) => {
+    // Reset then open to force consistent remount
+    setDetailReport(null);
+    setDetailVisible(false);
+    InteractionManager.runAfterInteractions(() => {
+      // Prefetch all report images (collage or single)
+      const allUris: string[] = Array.isArray((report as any)?.photoUrls)
+        ? ((report as any).photoUrls as string[])
+        : (report?.photoUrl ? [report.photoUrl] : []);
+      prefetchUris(allUris);
+      setDetailReport(report);
+      setDetailVisible(true);
+    });
+  };
+  
+  const showNextImage = () => {
+    if (imageViewerList.length <= 1) return;
+    const next = (imageViewerIndex + 1) % imageViewerList.length;
+    // Prefetch the next neighbor ahead of time
+    prefetchUris([imageViewerList[(next + 1) % imageViewerList.length]]);
+    setImageViewerIndex(next);
+    setImageViewerUri(imageViewerList[next]);
+  };
+  const refreshAnim = useRef(new Animated.Value(0)).current;
   // Animation values
+  const headerScale = useRef(new Animated.Value(0.95)).current;
   const fadeAnim = useRef(new Animated.Value(0)).current;
-  const slideAnim = useRef(new Animated.Value(30)).current;
-  const headerScale = useRef(new Animated.Value(0.9)).current;
-  const formScale = useRef(new Animated.Value(0.9)).current;
-  const statsScale = useRef(new Animated.Value(0.9)).current;
+  const slideAnim = useRef(new Animated.Value(10)).current;
+  const statsScale = useRef(new Animated.Value(0.95)).current;
+  const formScale = useRef(new Animated.Value(0.95)).current;
   const listAnim = useRef(new Animated.Value(0)).current;
   const pulseAnim = useRef(new Animated.Value(1)).current;
-  const refreshAnim = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
     // Entrance animations
@@ -504,17 +569,34 @@ const renderReportCard = ({ item }: { item: any; index: number }) => (
         📝 {item.description}
       </Text>
     )}
-    {(item.photoUrl || item.photoUri) ? (
-      <TouchableOpacity
-        activeOpacity={0.9}
-        onPress={() => {
-          setImageViewerUri(item.photoUrl || item.photoUri);
-          setImageViewerVisible(true);
-        }}
-      >
-        <Image source={{ uri: item.photoUrl || item.photoUri }} style={styles.thumbnail} resizeMode="cover" />
-      </TouchableOpacity>
-    ) : null}
+        {Array.isArray((item as any).photoUrls) && (item as any).photoUrls.length > 0 ? (
+      <View style={styles.collageGrid}>
+        {((item as any).photoUrls as string[]).slice(0, 4).map((uri, idx) => (
+          <TouchableOpacity
+            key={`${uri}-${idx}`}
+            activeOpacity={0.9}
+            onPress={() => openImageViewer((item as any).photoUrls as string[], idx)}
+            style={styles.collageItem}
+          >
+            <Image source={{ uri }} style={styles.collageImage} resizeMode="cover" />
+            {idx === 3 && (item as any).photoUrls.length > 4 && (
+              <View style={styles.collageOverlay}>
+                <Text style={styles.collageOverlayText}>+{(item as any).photoUrls.length - 4}</Text>
+              </View>
+            )}
+          </TouchableOpacity>
+        ))}
+      </View>
+    ) : (
+      (item.photoUrl || item.photoUri) ? (
+        <TouchableOpacity
+          activeOpacity={0.9}
+          onPress={() => openImageViewer((item.photoUrl || item.photoUri) as string)}
+        >
+          <Image source={{ uri: item.photoUrl || item.photoUri }} style={styles.thumbnail} resizeMode="cover" />
+        </TouchableOpacity>
+      ) : null
+    )}
 
     <View style={styles.reportDetails}>
       {!!item.fullName && (
@@ -550,7 +632,7 @@ const renderReportCard = ({ item }: { item: any; index: number }) => (
     {/* View Details Button */}
     <TouchableOpacity
       style={styles.viewDetailsBtn}
-      onPress={() => setDetailReport(item)}
+      onPress={() => openReportDetails(item)}
       activeOpacity={0.85}
     >
       <Text style={styles.viewDetailsBtnText}>👁️ View Full Details</Text>
@@ -620,11 +702,11 @@ return (
                             onPress={async () => {
                               if (n.reportId) {
                                 const rep = reports.find(r => String(r.id) === String(n.reportId));
-                                if (rep) setDetailReport(rep);
+                                if (rep) openReportDetails(rep);
                                 else {
                                   const all = await listAllReports();
                                   const found = all.find(r => String(r.id) === String(n.reportId)) || null;
-                                  if (found) setDetailReport(found);
+                                  if (found) openReportDetails(found);
                                 }
                               }
                               try {
@@ -799,37 +881,8 @@ return (
         onToggleSound={async (next) => { setSoundEnabledState(next); await setSoundEnabled(next); }}
       />
 
-      {/* Full-screen Image Viewer */}
-      <Modal
-        visible={imageViewerVisible}
-        transparent
-        animationType="fade"
-        onRequestClose={() => setImageViewerVisible(false)}
-      >
-        <View style={styles.viewerOverlay}>
-          <TouchableOpacity
-            style={StyleSheet.absoluteFill as any}
-            activeOpacity={1}
-            onPress={() => setImageViewerVisible(false)}
-          />
-          <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
-            {!!imageViewerUri && (
-              <Image
-                source={{ uri: imageViewerUri }}
-                style={styles.viewerImage}
-                resizeMode="contain"
-              />
-            )}
-          </View>
-          <TouchableOpacity
-            onPress={() => setImageViewerVisible(false)}
-            style={styles.viewerCloseBtn}
-            activeOpacity={0.8}
-          >
-            <Text style={styles.viewerCloseText}>✕</Text>
-          </TouchableOpacity>
-        </View>
-      </Modal>
+      
+
 
             {/* Action Buttons */}
             <View style={styles.modalActionRow}>
@@ -924,52 +977,139 @@ return (
         </View>
       </Modal>
 
+      {/* Full-screen Image Viewer (always mounted) */}
+      <Modal
+        visible={imageViewerVisible}
+        transparent
+        animationType="fade"
+        statusBarTranslucent={true}
+        hardwareAccelerated={true}
+        onRequestClose={() => setImageViewerVisible(false)}
+      >
+        <View style={styles.viewerOverlay}>
+          <TouchableOpacity
+            style={StyleSheet.absoluteFill as any}
+            activeOpacity={1}
+            onPress={() => setImageViewerVisible(false)}
+          />
+          <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
+            {!!imageViewerUri && (
+              <Image
+                source={{ uri: imageViewerUri }}
+                style={styles.viewerImage}
+                resizeMode="contain"
+              />
+            )}
+          </View>
+          <TouchableOpacity
+            onPress={() => setImageViewerVisible(false)}
+            style={styles.viewerCloseBtn}
+            activeOpacity={0.8}
+          >
+            <Text style={styles.viewerCloseText}></Text>
+          </TouchableOpacity>
+
+          {imageViewerList.length > 1 && (
+            <>
+              <TouchableOpacity
+                onPress={showPrevImage}
+                style={styles.viewerNavLeft}
+                activeOpacity={0.7}
+              >
+                <Text style={styles.viewerNavText}>‹</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                onPress={showNextImage}
+                style={styles.viewerNavRight}
+                activeOpacity={0.7}
+              >
+                <Text style={styles.viewerNavText}></Text>
+              </TouchableOpacity>
+
+              <View style={styles.viewerCounter}>
+                <Text style={styles.viewerCounterText}>
+                  {imageViewerIndex + 1}/{imageViewerList.length}
+                </Text>
+              </View>
+            </>
+          )}
+        </View>
+      </Modal>
+
       {/* Report Details Modal */}
-      <Modal visible={!!detailReport} transparent animationType="fade" onRequestClose={() => setDetailReport(null)}>
+      <Modal
+        visible={detailVisible}
+        transparent
+        animationType="fade"
+        onRequestClose={() => { setDetailVisible(false); setDetailReport(null); }}
+      >
         <View style={styles.modalOverlay}>
           <View style={styles.modalContent}>
             <Text style={styles.modalTitle}>📋 Report Details</Text>
-            {detailReport && (
+            {!!detailReport && (
               <ScrollView showsVerticalScrollIndicator={false}>
-                <Text style={styles.modalRow}>🆔 ID: {detailReport.id}</Text>
-                <Text style={styles.modalRow}>🏷️ Type: {detailReport.type}</Text>
-                <Text style={styles.modalRow}>📍 Status: {detailReport.status}</Text>
-                {detailReport.chiefComplaint && (
-                  <Text style={styles.modalRow}>🆘 Chief Complaint: {detailReport.chiefComplaint}</Text>
-                )}
-                {detailReport.description && (
-                  <Text style={styles.modalRow}>📝 Description: {detailReport.description}</Text>
-                )}
-                {detailReport.fullName && (
-                  <Text style={styles.modalRow}>🙍 Full Name: {detailReport.fullName}</Text>
-                )}
-                {detailReport.contactNo && (
-                  <Text style={styles.modalRow}>📞 Contact: {detailReport.contactNo}</Text>
-                )}
-                {detailReport.personsInvolved && (
-                  <Text style={styles.modalRow}>👥 Persons Involved: {detailReport.personsInvolved}</Text>
-                )}
+                {detailReport.id ? (<Text style={styles.modalRow}>🆔 ID: {detailReport.id}</Text>) : null}
+                {detailReport.type ? (<Text style={styles.modalRow}>🏷️ Type: {detailReport.type}</Text>) : null}
+                {detailReport.status ? (<Text style={styles.modalRow}>📍 Status: {detailReport.status}</Text>) : null}
+                {detailReport.chiefComplaint ? (<Text style={styles.modalRow}>🆘 Chief Complaint: {detailReport.chiefComplaint}</Text>) : null}
+                {detailReport.description ? (<Text style={styles.modalRow}>📝 Description: {detailReport.description}</Text>) : null}
+                {detailReport.fullName ? (<Text style={styles.modalRow}>🙍 Full Name: {detailReport.fullName}</Text>) : null}
+                {detailReport.contactNo ? (<Text style={styles.modalRow}>📞 Contact: {detailReport.contactNo}</Text>) : null}
+                {detailReport.personsInvolved ? (<Text style={styles.modalRow}>👥 Persons Involved: {detailReport.personsInvolved}</Text>) : null}
+                {(detailReport.responders || detailReport.responderId) ? (
+                  <Text style={styles.modalRow}>
+                    👨‍⚕️ Responder{Array.isArray(detailReport.responders) && detailReport.responders.length > 1 ? 's' : ''}: {
+                      Array.isArray(detailReport.responders) && detailReport.responders.length > 0
+                        ? detailReport.responders.map((rid: string) => nameById(rid) || rid).join(', ')
+                        : (nameById(detailReport.responderId) || 'Unassigned')
+                    }
+                  </Text>
+                ) : null}
                 <Text style={styles.modalRow}>
-                  👨‍⚕️ Responder{Array.isArray(detailReport.responders) && detailReport.responders.length > 1 ? 's' : ''}: {
-                    Array.isArray(detailReport.responders) && detailReport.responders.length > 0
-                      ? detailReport.responders.map((rid: string) => nameById(rid) || rid).join(', ')
-                      : (nameById(detailReport.responderId) || 'Unassigned')
-                  }
+                  👤 Reporter: {detailReport.fullName ? detailReport.fullName : (detailReport.userId ? (nameById(detailReport.userId) || 'Anonymous') : 'Anonymous')}
                 </Text>
-                <Text style={styles.modalRow}>👤 Reporter: {detailReport.fullName ? detailReport.fullName : (detailReport.userId ? (nameById(detailReport.userId) || 'Anonymous') : 'Anonymous')}</Text>
-                <Text style={styles.modalRow}>📅 Created: {detailReport.createdAt ? new Date(detailReport.createdAt).toLocaleString() : '—'}</Text>
-                {detailReport.updatedAt && (
+                {detailReport.createdAt ? (
+                  <Text style={styles.modalRow}>📅 Created: {new Date(detailReport.createdAt).toLocaleString()}</Text>
+                ) : null}
+                {detailReport.updatedAt ? (
                   <Text style={styles.modalRow}>🔄 Updated: {new Date(detailReport.updatedAt).toLocaleString()}</Text>
-                )}
-                {detailReport.photoUrl && (
+                ) : null}
+
+                {Array.isArray((detailReport as any).photoUrls) && (detailReport as any).photoUrls.length > 0 ? (
                   <View style={{ marginTop: 12 }}>
-                    <Text style={styles.modalRow}>📸 Photo:</Text>
-                    <Image source={{ uri: detailReport.photoUrl }} style={styles.thumbnail} resizeMode="cover" />
+                    <Text style={styles.modalRow}>📸 Photos:</Text>
+                    <View style={styles.collageGrid}>
+                      {((detailReport as any).photoUrls as string[]).slice(0, 4).map((uri, idx) => (
+                        <TouchableOpacity
+                          key={`${uri}-${idx}`}
+                          activeOpacity={0.9}
+                          onPress={() => openImageViewer((detailReport as any).photoUrls as string[], idx)}
+                          style={styles.collageItem}
+                        >
+                          <Image source={{ uri }} style={styles.collageImage} resizeMode="cover" />
+                          {idx === 3 && (detailReport as any).photoUrls.length > 4 && (
+                            <View style={styles.collageOverlay}>
+                              <Text style={styles.collageOverlayText}>+{(detailReport as any).photoUrls.length - 4}</Text>
+                            </View>
+                          )}
+                        </TouchableOpacity>
+                      ))}
+                    </View>
                   </View>
+                ) : (
+                  detailReport.photoUrl ? (
+                    <View style={{ marginTop: 12 }}>
+                      <Text style={styles.modalRow}>📸 Photo:</Text>
+                      <TouchableOpacity activeOpacity={0.9} onPress={() => openImageViewer(detailReport.photoUrl as string)}>
+                        <Image source={{ uri: detailReport.photoUrl }} style={styles.thumbnail} resizeMode="cover" />
+                      </TouchableOpacity>
+                    </View>
+                  ) : null
                 )}
               </ScrollView>
             )}
-            <TouchableOpacity style={styles.modalCloseBtn} onPress={() => setDetailReport(null)}>
+            <TouchableOpacity style={styles.modalCloseBtn} onPress={() => { setDetailVisible(false); setDetailReport(null); }}>
               <Text style={styles.modalCloseText}>Close</Text>
             </TouchableOpacity>
           </View>
@@ -2591,4 +2731,83 @@ const styles = StyleSheet.create({
     fontSize: 18,
     fontWeight: '900',
   },
+  collageGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+    marginBottom: 12,
+  },
+  collageItem: {
+    width: '48%', // This ensures 2 items per row with some spacing
+    aspectRatio: 1, // Makes it square for consistent sizing
+    borderRadius: 8,
+    overflow: 'hidden',
+    backgroundColor: '#111',
+    borderWidth: 1,
+    borderColor: '#222',
+  },
+  collageImage: {
+    width: '100%',
+    height: '100%',
+    resizeMode: 'cover', // Important: ensures image fills the container properly
+  },
+  collageOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  collageOverlayText: {
+    color: '#fff',
+    fontWeight: '900',
+    fontSize: 20,
+  },
+  viewerNavLeft: {
+    position: 'absolute',
+    left: 12,
+    top: '50%',
+    marginTop: -22,
+    backgroundColor: 'rgba(255,255,255,0.15)',
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  viewerNavRight: {
+    position: 'absolute',
+    right: 12,
+    top: '50%',
+    marginTop: -22,
+    backgroundColor: 'rgba(255,255,255,0.15)',
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  viewerNavText: {
+    color: '#fff',
+    fontSize: 28,
+    fontWeight: '900',
+    lineHeight: 28,
+  },
+  viewerCounter: {
+    position: 'absolute',
+    bottom: 24,
+    alignSelf: 'center',
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 12,
+  },
+  viewerCounterText: {
+    color: '#fff',
+    fontWeight: '800',
+    fontSize: 12,
+  },
+
 });
+
+
+

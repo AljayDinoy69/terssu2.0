@@ -4,13 +4,14 @@ import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { RootStackParamList } from '../navigation/AppNavigator';
 import * as Location from 'expo-location';
 import * as ImagePicker from 'expo-image-picker';
-import { createReport, getCurrentUser, listResponders } from '../utils/auth';
 import { uploadImage } from '../utils/api';
+import { createReport, getCurrentUser, listResponders } from '../utils/auth';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 export type ReportProps = NativeStackScreenProps<RootStackParamList, 'Report'>;
 
 const { width } = Dimensions.get('window');
+const MAX_PHOTOS = 4;
 
 export default function ReportScreen({ navigation, route }: ReportProps) {
   // Removed incidentType per request
@@ -159,7 +160,7 @@ export default function ReportScreen({ navigation, route }: ReportProps) {
   useEffect(() => {
     (async () => {
       const list = await listResponders();
-      setResponders(list.map(r => ({ id: r.id, name: r.name })));
+      setResponders(list.map((r: any) => ({ id: r.id, name: r.name })));
 
       const { status } = await Location.requestForegroundPermissionsAsync();
       if (status === 'granted') {
@@ -180,6 +181,10 @@ export default function ReportScreen({ navigation, route }: ReportProps) {
 
   const captureImage = async () => {
     try {
+      if (photos.length >= MAX_PHOTOS) {
+        Alert.alert('Limit reached', `You can attach up to ${MAX_PHOTOS} photos per report.`);
+        return;
+      }
       const perm = await ImagePicker.requestCameraPermissionsAsync();
       if (perm.status !== 'granted') {
         Alert.alert('Permission needed', 'Camera permission is required to capture photos.');
@@ -192,7 +197,10 @@ export default function ReportScreen({ navigation, route }: ReportProps) {
       });
       
       if (!res.canceled && res.assets && res.assets.length > 0) {
-        setPhotos(prev => [...prev, res.assets[0].uri]);
+        setPhotos(prev => {
+          const next = [...prev, res.assets[0].uri];
+          return next.slice(0, MAX_PHOTOS);
+        });
       }
     } catch (error) {
       console.error('Error capturing image:', error);
@@ -250,8 +258,8 @@ export default function ReportScreen({ navigation, route }: ReportProps) {
       }
       
       // Upload all photos and get their URLs
-      const uploadedPhotos = [];
-      for (const photoUri of photos) {
+      const uploadedPhotos: string[] = [];
+      for (const photoUri of photos.slice(0, MAX_PHOTOS)) {
         try {
           const uploaded = await uploadImage(photoUri);
           uploadedPhotos.push(uploaded.url);
@@ -278,6 +286,7 @@ export default function ReportScreen({ navigation, route }: ReportProps) {
             description: description || 'None', // Set to 'None' if empty
             location: locationText,
             photoUrl, // preferred; server also maps legacy photoUri
+            photoUrls: uploadedPhotos,
             responderId: rid,
             userId,
             deviceId, // Include device ID for anonymous reports
@@ -564,12 +573,15 @@ export default function ReportScreen({ navigation, route }: ReportProps) {
             <View style={styles.photoContainer}>
               <Text style={styles.inputLabel}>📷 Evidence Photos (Required)</Text>
               <TouchableOpacity 
-                style={styles.photoButton} 
+                style={[styles.photoButton, photos.length >= MAX_PHOTOS && styles.photoButtonDisabled]} 
                 onPress={captureImage}
+                disabled={photos.length >= MAX_PHOTOS}
                 activeOpacity={0.8}
               >
                 <Text style={styles.photoButtonText}>📸 Add Photo</Text>
-                <Text style={styles.photoButtonSubtext}>Tap to capture more photos</Text>
+                <Text style={styles.photoButtonSubtext}>
+                  {photos.length}/{MAX_PHOTOS} attached {photos.length >= MAX_PHOTOS ? '(max reached)' : '· Tap to capture more'}
+                </Text>
               </TouchableOpacity>
               
               <View style={styles.photosGrid}>
@@ -589,7 +601,7 @@ export default function ReportScreen({ navigation, route }: ReportProps) {
                 ))}
               </View>
               {photos.length === 0 && (
-                <Text style={styles.photoHint}>Please capture at least one photo</Text>
+                <Text style={styles.photoHint}>Please capture 1 up to 4 photo</Text>
               )}
             </View>
           </Animated.View>
@@ -793,6 +805,9 @@ const styles = StyleSheet.create({
     backgroundColor: '#1a1a2e',
     alignItems: 'center',
     borderStyle: 'dashed',
+  },
+  photoButtonDisabled: {
+    opacity: 0.5,
   },
   photoButtonText: {
     color: '#fff',

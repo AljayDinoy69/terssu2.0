@@ -3,6 +3,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 const SOUND_PREF_KEY = 'notificationSoundEnabled';
 const THEME_PREF_KEY = 'appTheme'; // 'system' | 'light' | 'dark'
 const NOTIF_FREQ_KEY = 'notificationFrequency'; // 'off' | 'low' | 'normal' | 'high'
+const RINGTONE_KEY = 'notificationRingtoneKey'; // e.g., 'ring1'
 
 export type AppTheme = 'system' | 'light' | 'dark';
 export type NotificationFrequency = 'off' | 'low' | 'normal' | 'high';
@@ -56,6 +57,23 @@ export async function getNotificationFrequency(): Promise<NotificationFrequency>
 export async function setNotificationFrequency(freq: NotificationFrequency): Promise<void> {
   try {
     await AsyncStorage.setItem(NOTIF_FREQ_KEY, freq);
+  } catch {
+    // ignore
+  }
+}
+
+export async function getSelectedRingtoneKey(): Promise<string> {
+  try {
+    const v = await AsyncStorage.getItem(RINGTONE_KEY);
+    return v || 'ring1';
+  } catch {
+    return 'ring1';
+  }
+}
+
+export async function setSelectedRingtoneKey(key: string): Promise<void> {
+  try {
+    await AsyncStorage.setItem(RINGTONE_KEY, key);
   } catch {
     // ignore
   }

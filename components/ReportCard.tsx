@@ -59,19 +59,39 @@ export const ReportCard: React.FC<ReportCardProps> = ({ item, index, nameMap, on
         </Text>
       )}
 
-      {/* Display image if available */}
-      {(item.photoUrl || item.photoUri) ? (
-        <TouchableOpacity
-          activeOpacity={0.9}
-          onPress={() => onImagePress && onImagePress(item.photoUrl || item.photoUri || '')}
-        >
-          <Image
-            source={{ uri: item.photoUrl || item.photoUri }}
-            style={[styles.thumbnail, themed.thumbBorder]}
-            resizeMode="cover"
-          />
-        </TouchableOpacity>
-      ) : null}
+      {/* Display multiple images (collage) if available, else fallback to single image */}
+      {Array.isArray((item as any).photoUrls) && (item as any).photoUrls.length > 0 ? (
+        <View style={styles.collageGrid}>
+          {((item as any).photoUrls as string[]).slice(0, 4).map((uri, idx) => (
+            <TouchableOpacity
+              key={`${uri}-${idx}`}
+              activeOpacity={0.9}
+              onPress={() => onImagePress && onImagePress(uri)}
+              style={styles.collageItem}
+            >
+              <Image source={{ uri }} style={[styles.collageImage, themed.thumbBorder]} resizeMode="cover" />
+              {idx === 3 && (item as any).photoUrls.length > 4 && (
+                <View style={styles.collageOverlay}>
+                  <Text style={styles.collageOverlayText}>+{(item as any).photoUrls.length - 4}</Text>
+                </View>
+              )}
+            </TouchableOpacity>
+          ))}
+        </View>
+      ) : (
+        (item.photoUrl || item.photoUri) ? (
+          <TouchableOpacity
+            activeOpacity={0.9}
+            onPress={() => onImagePress && onImagePress(item.photoUrl || item.photoUri || '')}
+          >
+            <Image
+              source={{ uri: item.photoUrl || item.photoUri }}
+              style={[styles.thumbnail, themed.thumbBorder]}
+              resizeMode="cover"
+            />
+          </TouchableOpacity>
+        ) : null
+      )}
 
       <View style={[styles.reportDetails, themed.detailsBorder]}>
         {!!item.fullName && (
@@ -195,5 +215,37 @@ const styles = StyleSheet.create({
     color: '#ffd166',
     fontWeight: '700',
     fontSize: 14,
+  },
+  collageGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'space-between',
+    marginBottom: 12,
+    gap: 0,
+  },
+  collageItem: {
+    width: '49%',
+    aspectRatio: 1,
+    borderRadius: 10,
+    overflow: 'hidden',
+    marginBottom: 8,
+  },
+  collageImage: {
+    width: '100%',
+    height: '100%',
+    backgroundColor: '#111',
+    borderWidth: 1,
+    borderColor: '#333',
+  },
+  collageOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(0,0,0,0.45)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  collageOverlayText: {
+    color: '#fff',
+    fontWeight: '800',
+    fontSize: 20,
   },
 });

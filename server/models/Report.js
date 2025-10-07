@@ -6,6 +6,7 @@ const ReportSchema = new mongoose.Schema(
     description: { type: String, required: true },
     location: { type: String, required: true },
     photoUrl: { type: String },
+    photoUrls: [{ type: String }],
     responderId: { type: String, required: true, index: true },
     userId: { type: String },
     // Device identifier for anonymous reports to enable targeted notifications

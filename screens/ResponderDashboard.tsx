@@ -1,11 +1,11 @@
-import React, { useEffect, useState, useRef } from 'react';
-import { View, Text, StyleSheet, FlatList, TouchableOpacity, Alert, Image, ScrollView, Animated, Dimensions, Modal, Platform } from 'react-native';
+﻿import React, { useEffect, useState, useRef } from 'react';
+import { View, Text, StyleSheet, FlatList, TouchableOpacity, Alert, Image, ScrollView, Animated, Dimensions, Modal, Platform, Linking } from 'react-native';
 import * as Location from 'expo-location';
-import { MapComponent } from '../components/MapComponent';
-import { ReportCard } from '../components/ReportCard';
-
 import Constants from 'expo-constants';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
+
+import { MapComponent } from '../components/MapComponent';
+import { ReportCard } from '../components/ReportCard';
 import { RootStackParamList } from '../navigation/AppNavigator';
 import { getCurrentUser, listAssignedReports, logout, Report, updateReportStatus, ReportStatus, listUsers, listNotifications, markNotificationRead, deleteNotification, markAllNotificationsRead, Notification as NotificationItem } from '../utils/auth';
 import { API_BASE_URL } from '../utils/api';
@@ -266,6 +266,27 @@ export default function ResponderDashboard({ navigation }: ResponderDashProps) {
         } catch {}
       }
     }
+    const openExternalMaps = async (report: Report) => {
+      const loc = parseLocation(report.location);
+      if (!loc) {
+        Alert.alert('Invalid location', 'This report does not have a valid incident location.');
+        return;
+      }
+      const { lat, lon } = loc;
+      const apple = `http://maps.apple.com/?daddr=${lat},${lon}`;
+      const google = `https://www.google.com/maps/dir/?api=1&destination=${lat},${lon}`;
+      const target = Platform.OS === 'ios' ? apple : google;
+      try {
+        const supported = await Linking.canOpenURL(target);
+        if (supported) {
+          await Linking.openURL(target);
+        } else {
+          await Linking.openURL(google);
+        }
+      } catch (e) {
+        Alert.alert('Unable to open maps', 'Please open your maps app manually.');
+      }
+    };
     // Remove clicked notification and close dropdown
     // Mark as read on server if unread
     try {
@@ -282,9 +303,10 @@ export default function ResponderDashboard({ navigation }: ResponderDashProps) {
     if (target) setDetailReport(target);
   };
 
-  const pending = reports.filter(r => r.status === 'Pending');
-  const active = reports.filter(r => r.status === 'In-progress');
-  const completed = reports.filter(r => r.status === 'Resolved');
+  const byNewest = (a: any, b: any) => Number(b?.createdAt ?? 0) - Number(a?.createdAt ?? 0);
+  const pending = reports.filter(r => r.status === 'Pending').sort(byNewest);
+  const active = reports.filter(r => r.status === 'In-progress').sort(byNewest);
+  const completed = reports.filter(r => r.status === 'Resolved').sort(byNewest);
 
   const getStatsData = () => {
     return {
@@ -369,10 +391,14 @@ export default function ResponderDashboard({ navigation }: ResponderDashProps) {
     setMapOpen(true);
   };
 
+  function openExternalMaps(detailReport: Report) {
+    throw new Error('Function not implemented.');
+  }
+
   return (
     <View style={[styles.container, { backgroundColor: colors.background }]}>
       <View style={styles.backgroundPattern} pointerEvents="none" />
-      
+
       {/* Header */}
       <View style={styles.header}> 
         <View style={styles.headerContent}>
@@ -733,9 +759,37 @@ export default function ResponderDashboard({ navigation }: ResponderDashProps) {
                 ) : null}
                 <View style={styles.modalRow}><Text style={[styles.modalLabel, { color: colors.text + '66' }]}>From:</Text><Text style={[styles.modalValue, { color: colors.text }]}>{detailReport.fullName || (detailReport.userId ? (nameMap[detailReport.userId] || 'Anonymous') : 'Anonymous')}</Text></View>
                 <View style={styles.modalRow}><Text style={[styles.modalLabel, { color: colors.text + '66' }]}>Created:</Text><Text style={[styles.modalValue, { color: colors.text }]}>{new Date(detailReport.createdAt).toLocaleString()}</Text></View>
-                {(detailReport.photoUrl || detailReport.photoUri) ? (
-                  <Image source={{ uri: detailReport.photoUrl || detailReport.photoUri }} style={styles.modalImage} resizeMode="cover" />
-                ) : null}
+                {Array.isArray((detailReport as any).photoUrls) && (detailReport as any).photoUrls.length > 0 ? (
+                <View style={{ marginTop: 12 }}>
+                  <Text style={[styles.modalLabel, { color: colors.text + '66', marginBottom: 8 }]}>Photos:</Text>
+                  <View style={styles.collageGrid}>
+                    {((detailReport as any).photoUrls as string[]).slice(0, 4).map((uri, idx) => (
+                      <TouchableOpacity
+                        key={`${uri}-${idx}`}
+                        activeOpacity={0.9}
+                        onPress={() => { setImageViewerUri(uri); setImageViewerVisible(true); }}
+                        style={styles.collageItem}
+                      >
+                        <Image source={{ uri }} style={styles.collageImage} resizeMode="cover" />
+                        {idx === 3 && (detailReport as any).photoUrls.length > 4 && (
+                          <View style={styles.collageOverlay}>
+                            <Text style={styles.collageOverlayText}>+{(detailReport as any).photoUrls.length - 4}</Text>
+                          </View>
+                        )}
+                      </TouchableOpacity>
+                    ))}
+                  </View>
+                </View>
+              ) : (
+                (detailReport.photoUrl || detailReport.photoUri) ? (
+                  <TouchableOpacity
+                    activeOpacity={0.9}
+                    onPress={() => { setImageViewerUri((detailReport.photoUrl || detailReport.photoUri) as string); setImageViewerVisible(true); }}
+                  >
+                    <Image source={{ uri: detailReport.photoUrl || detailReport.photoUri }} style={styles.modalImage} resizeMode="cover" />
+                  </TouchableOpacity>
+                ) : null
+              )}
               </ScrollView>
             )}
 
@@ -750,6 +804,9 @@ export default function ResponderDashboard({ navigation }: ResponderDashProps) {
                 <TouchableOpacity
                   style={styles.deleteBtn}
                   onPress={async () => {
+                    if (detailReport.status === 'Pending') {
+                      await openExternalMaps(detailReport);
+                    }
                     await onAdvance(detailReport.id, detailReport.status);
                     setDetailReport(null);
                   }}
@@ -1483,5 +1540,35 @@ const styles = StyleSheet.create({
     color: '#fff',
     fontSize: 18,
     fontWeight: '900',
+  },
+  collageGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  collageItem: {
+    width: (width - 16 - 16 - 8) / 2, // roughly 2 columns inside modal padding
+    maxWidth: '48%',
+    aspectRatio: 1,
+    borderRadius: 10,
+    overflow: 'hidden',
+    backgroundColor: '#111',
+    borderWidth: 1,
+    borderColor: '#333',
+  },
+  collageImage: {
+    width: '100%',
+    height: '100%',
+  },
+  collageOverlay: {
+    ...StyleSheet.absoluteFillObject as any,
+    backgroundColor: 'rgba(0,0,0,0.45)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  collageOverlayText: {
+    color: '#fff',
+    fontWeight: '800',
+    fontSize: 18,
   },
 });

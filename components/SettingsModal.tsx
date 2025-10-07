@@ -1,6 +1,8 @@
 import React, { useEffect, useState } from 'react';
 import { Modal, View, Text, StyleSheet, TouchableOpacity, Switch } from 'react-native';
-import { getAppTheme, setAppTheme, getNotificationFrequency, setNotificationFrequency, AppTheme, NotificationFrequency } from '../utils/settings';
+import { getAppTheme, setAppTheme, getNotificationFrequency, setNotificationFrequency, AppTheme, NotificationFrequency, getSelectedRingtoneKey, setSelectedRingtoneKey } from '../utils/settings';
+import { getRingtones } from '../utils/ringtones';
+import { playNotificationSound } from '../utils/sound';
 import { useTheme } from './ThemeProvider';
 
 export type SettingsModalProps = {
@@ -14,6 +16,9 @@ export default function SettingsModal({ visible, onClose, soundEnabled, onToggle
   const { setMode, colors } = useTheme();
   const [theme, setTheme] = useState<AppTheme>('system');
   const [notifFreq, setNotifFreq] = useState<NotificationFrequency>('normal');
+  const [ringtoneKey, setRingtoneKey] = useState<string>('ring1');
+  const ringtones = getRingtones();
+  const [ringtoneOpen, setRingtoneOpen] = useState<boolean>(false);
 
   useEffect(() => {
     if (!visible) return;
@@ -25,6 +30,10 @@ export default function SettingsModal({ visible, onClose, soundEnabled, onToggle
       try {
         const f = await getNotificationFrequency();
         setNotifFreq(f);
+      } catch {}
+      try {
+        const rk = await getSelectedRingtoneKey();
+        setRingtoneKey(rk);
       } catch {}
     })();
   }, [visible]);
@@ -70,6 +79,47 @@ export default function SettingsModal({ visible, onClose, soundEnabled, onToggle
           </View>
 
           <View style={[styles.divider, { backgroundColor: colors.text + '22' }]} />
+
+          {/* Ringtone Picker (Dropdown) */}
+          <View style={styles.rowColumn}>
+            <Text style={[styles.rowTitle, { color: colors.text }]}>Ringtone</Text>
+            <Text style={[styles.rowSub, { color: colors.text + '99' }]}>Choose the sound to play for notifications</Text>
+            <View style={{ marginTop: 8 }}>
+              <TouchableOpacity
+                style={[styles.dropdownHeader, { borderColor: colors.text + '22' }]}
+                onPress={() => setRingtoneOpen(o => !o)}
+                activeOpacity={0.85}
+              >
+                <Text style={[styles.dropdownHeaderText, { color: colors.text }]}>
+                  {ringtones.find(r => r.key === ringtoneKey)?.label || 'Select ringtone'}
+                </Text>
+                <Text style={[styles.dropdownChevron, { color: colors.text + '99' }]}>{ringtoneOpen ? '▲' : '▼'}</Text>
+              </TouchableOpacity>
+
+              {ringtoneOpen && (
+                <View style={[styles.dropdownList, { borderColor: colors.text + '22' }]}> 
+                  {ringtones.map(rt => (
+                    <TouchableOpacity
+                      key={rt.key}
+                      style={[styles.dropdownItem, ringtoneKey === rt.key && styles.dropdownItemActive]}
+                      onPress={async () => {
+                        setRingtoneKey(rt.key);
+                        await setSelectedRingtoneKey(rt.key);
+                        setRingtoneOpen(false);
+                        await playNotificationSound();
+                      }}
+                      activeOpacity={0.85}
+                    >
+                      <Text style={[styles.dropdownItemText, { color: colors.text }]}>
+                        {rt.label}
+                        {ringtoneKey === rt.key ? '  ✓' : ''}
+                      </Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+              )}
+            </View>
+          </View>
 
           {/* Theme */}
           <View style={styles.rowColumn}>
@@ -199,5 +249,40 @@ const styles = StyleSheet.create({
   closeBtnText: {
     color: '#fff',
     fontWeight: '800',
+  },
+  dropdownHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: '#1a1a2e',
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    borderRadius: 8,
+    borderWidth: 1,
+  },
+  dropdownHeaderText: {
+    fontWeight: '800',
+    fontSize: 13,
+  },
+  dropdownChevron: {
+    fontSize: 12,
+  },
+  dropdownList: {
+    marginTop: 6,
+    backgroundColor: '#151528',
+    borderRadius: 8,
+    borderWidth: 1,
+    overflow: 'hidden',
+  },
+  dropdownItem: {
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+  },
+  dropdownItemActive: {
+    backgroundColor: '#667eea30',
+  },
+  dropdownItemText: {
+    fontWeight: '700',
+    fontSize: 13,
   },
 });

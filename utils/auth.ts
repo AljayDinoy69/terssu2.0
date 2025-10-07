@@ -23,6 +23,7 @@ export type Report = {
   location: string;
   photoUri?: string;
   photoUrl?: string;
+  photoUrls?: string[];
   userId?: string; // undefined when anonymous
   responderId: string;
   deviceId?: string; // Device identifier for anonymous reports

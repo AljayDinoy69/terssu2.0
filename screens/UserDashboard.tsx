@@ -305,7 +305,7 @@ setProfileModalVisible(false);
     };
     const map = new Map<string, any>();
     for (const r of items) {
-      const key = `${r.userId || r.deviceId || 'anon'}|${r.type}|${r.description}|${r.location}|${r.photoUrl || r.photoUri || ''}`;
+      const key = `${r.userId || r.deviceId || 'anon'}|${r.type}|${r.description}|${r.location}|${r.photoUrl || r.photoUri || ''}|${Array.isArray((r as any).photoUrls) ? (r as any).photoUrls.join(',') : ''}`;
       const existing = map.get(key);
       if (!existing) {
         map.set(key, { ...r, id: key, responders: [r.responderId] });
@@ -315,7 +315,7 @@ setProfileModalVisible(false);
         // escalate status if needed
         if (prio(r.status) > prio(existing.status)) existing.status = r.status;
         // keep latest photo if missing
-        if (!existing.photoUrl && r.photoUrl) existing.photoUrl = r.photoUrl;
+        if (!existing.photoUrls && (r as any).photoUrls) existing.photoUrls = (r as any).photoUrls;
       }
     }
     return Array.from(map.values());
@@ -401,22 +401,42 @@ setProfileModalVisible(false);
         </Text>
       )}
 
-      {(item.photoUrl || item.photoUri) && (
-        <TouchableOpacity
-          activeOpacity={0.9}
-          onPress={() => {
-            const uri = (item.photoUrl || item.photoUri) as string;
-            setImageViewerUri(uri);
-            setImageViewerVisible(true);
-          }}
-        >
-          <Image
-            source={{ uri: (item.photoUrl || item.photoUri) as string }}
-            style={styles.cardImage}
-            resizeMode="cover"
-          />
-        </TouchableOpacity>
-      )}
+{Array.isArray((item as any).photoUrls) && (item as any).photoUrls.length > 0 ? (
+  <View style={styles.collageGrid}>
+    {((item as any).photoUrls as string[]).slice(0, 4).map((uri, idx) => (
+      <TouchableOpacity
+        key={`${uri}-${idx}`}
+        activeOpacity={0.9}
+        onPress={() => { setImageViewerUri(uri); setImageViewerVisible(true); }}
+        style={styles.collageItem}
+      >
+        <Image source={{ uri }} style={styles.collageImage} resizeMode="cover" />
+        {idx === 3 && (item as any).photoUrls.length > 4 && (
+          <View style={styles.collageOverlay}>
+            <Text style={styles.collageOverlayText}>+{(item as any).photoUrls.length - 4}</Text>
+          </View>
+        )}
+      </TouchableOpacity>
+    ))}
+  </View>
+) : (
+  (item.photoUrl || item.photoUri) ? (
+    <TouchableOpacity
+      activeOpacity={0.9}
+      onPress={() => {
+        const uri = (item.photoUrl || item.photoUri) as string;
+        setImageViewerUri(uri);
+        setImageViewerVisible(true);
+      }}
+    >
+      <Image
+        source={{ uri: (item.photoUrl || item.photoUri) as string }}
+        style={styles.cardImage}
+        resizeMode="cover"
+      />
+    </TouchableOpacity>
+  ) : null
+)}
       
       <View style={styles.cardDetails}>
         <Text style={styles.cardMeta} numberOfLines={2}>
@@ -1242,4 +1262,35 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     lineHeight: 20,
    },
+   collageGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+    marginBottom: 12,
+  },
+  collageItem: {
+    width: '48%', // This ensures 2 items per row with some spacing
+    aspectRatio: 1, // Makes it square for consistent sizing
+    borderRadius: 8,
+    overflow: 'hidden',
+    backgroundColor: '#111',
+    borderWidth: 1,
+    borderColor: '#222',
+  },
+  collageImage: {
+    width: '100%',
+    height: '100%',
+    resizeMode: 'cover', // Important: ensures image fills the container properly
+  },
+  collageOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  collageOverlayText: {
+    color: '#fff',
+    fontWeight: '900',
+    fontSize: 20,
+  }
 });
