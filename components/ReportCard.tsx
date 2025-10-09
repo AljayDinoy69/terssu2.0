@@ -41,21 +41,21 @@ export const ReportCard: React.FC<ReportCardProps> = ({ item, index, nameMap, on
                           item.status === 'Resolved' ? '#4caf50' : '#999'
         }]}>
           <Text style={styles.statusText}>
-            {item.status === 'Pending' ? '⏳' :
-             item.status === 'In-progress' ? '🚀' :
-             item.status === 'Resolved' ? '✅' : '❓'} {item.status?.toUpperCase() || 'UNKNOWN'}
+            {item.status === 'Pending' ? '' :
+             item.status === 'In-progress' ? '' :
+             item.status === 'Resolved' ? '' : ''} {item.status?.toUpperCase() || 'UNKNOWN'}
           </Text>
         </View>
       </View>
 
       {!!item.chiefComplaint && (
         <Text style={[styles.cardDesc, themed.desc]} numberOfLines={2} ellipsizeMode="tail">
-          🆘 Chief Complaint: {item.chiefComplaint}
+         Chief Complaint: {item.chiefComplaint}
         </Text>
       )}
       {!!item.description && (
         <Text style={[styles.cardDesc, themed.desc]} numberOfLines={3} ellipsizeMode="tail">
-          📝 {item.description}
+          Description: {item.description}
         </Text>
       )}
 
@@ -96,27 +96,27 @@ export const ReportCard: React.FC<ReportCardProps> = ({ item, index, nameMap, on
       <View style={[styles.reportDetails, themed.detailsBorder]}>
         {!!item.fullName && (
           <Text style={[styles.meta, themed.meta]} numberOfLines={1} ellipsizeMode="tail">
-            🙋 Full Name: {item.fullName}
+            Full Name: {item.fullName}
           </Text>
         )}
         {!!item.contactNo && (
           <Text style={[styles.meta, themed.meta]} numberOfLines={1} ellipsizeMode="tail">
-            📞 Contact: {item.contactNo}
+            Contact: {item.contactNo}
           </Text>
         )}
         {!!item.personsInvolved && (
           <Text style={[styles.meta, themed.meta]} numberOfLines={1} ellipsizeMode="tail">
-            👥 Persons Involved: {item.personsInvolved}
+            Persons Involved: {item.personsInvolved}
           </Text>
         )}
         <Text style={[styles.meta, themed.meta]} numberOfLines={1} ellipsizeMode="tail">
-          👨‍🚒 Responder: {nameMap?.[item.responderId || ''] || 'Unassigned'}
+          Responder: {nameMap?.[item.responderId || ''] || 'Unassigned'}
         </Text>
         <Text style={[styles.meta, themed.meta]} numberOfLines={1} ellipsizeMode="middle">
-          👤 From: {item.fullName || (item.userId ? (nameMap?.[item.userId] || 'Anonymous') : 'Anonymous')}
+          From: {item.fullName || (item.userId ? (nameMap?.[item.userId] || 'Anonymous') : 'Anonymous')}
         </Text>
         <Text style={[styles.meta, themed.meta]}>
-          📅 Created: {new Date(item.createdAt).toLocaleString()}
+          Created: {new Date(item.createdAt).toLocaleString()}
         </Text>
       </View>
 
@@ -126,7 +126,7 @@ export const ReportCard: React.FC<ReportCardProps> = ({ item, index, nameMap, on
           onPress={onPress}
           activeOpacity={0.85}
         >
-          <Text style={[styles.viewBtnText, themed.viewBtnText]}>👁️ View Details</Text>
+          <Text style={[styles.viewBtnText, themed.viewBtnText]}>View Details</Text>
         </TouchableOpacity>
       </View>
     </TouchableOpacity>

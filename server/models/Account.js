@@ -7,6 +7,7 @@ const AccountSchema = new mongoose.Schema(
     phone: { type: String },
     role: { type: String, enum: ['user', 'responder', 'admin'], default: 'user', index: true },
     password: { type: String, required: true },
+    restricted: { type: Boolean, default: false },
     // Optional profile fields
     photoUrl: { type: String },
     avatarUrl: { type: String },
@@ -27,3 +28,4 @@ AccountSchema.methods.toSafeJSON = function () {
 
 export const Account = mongoose.models.Account || mongoose.model('Account', AccountSchema);
 export default Account;
+

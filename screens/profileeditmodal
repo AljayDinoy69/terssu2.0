@@ -1,0 +1,89 @@
+{/* Profile Edit Modal */}
+      <Modal visible={!!editProfile} transparent animationType="fade" onRequestClose={cancelProfileEdit}>
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            <Text style={styles.modalTitle}>👤 Edit Profile</Text>
+            <ScrollView showsVerticalScrollIndicator={false}>
+              {/* Profile Picture Placeholder */}
+              <View style={styles.profileAvatar}>
+                <Text style={styles.profileAvatarText}>
+                  {profileForm.name ? profileForm.name.charAt(0).toUpperCase() : '👤'}
+                </Text>
+              </View>
+
+              {/* Form Fields */}
+              <View style={styles.formContainer}>
+                <Text style={styles.inputLabel}>👤 Full Name</Text>
+                <TextInput
+                  style={[styles.input, profileForm.name && styles.inputFilled]}
+                  placeholder="Enter your full name"
+                  placeholderTextColor="#888"
+                  value={profileForm.name}
+                  onChangeText={(text) => setProfileForm(prev => ({ ...prev, name: text }))}
+                  autoCapitalize="words"
+                />
+
+                <Text style={styles.inputLabel}>📧 Email Address</Text>
+                <TextInput
+                  style={[styles.input, profileForm.email && styles.inputFilled]}
+                  placeholder="Enter your email"
+                  placeholderTextColor="#888"
+                  value={profileForm.email}
+                  onChangeText={(text) => setProfileForm(prev => ({ ...prev, email: text }))}
+                  keyboardType="email-address"
+                  autoCapitalize="none"
+                />
+
+                <Text style={styles.inputLabel}>📱 Phone Number</Text>
+                <TextInput
+                  style={[styles.input, profileForm.phone && styles.inputFilled]}
+                  placeholder="Enter your phone number"
+                  placeholderTextColor="#888"
+                  value={profileForm.phone}
+                  onChangeText={(text) => setProfileForm(prev => ({ ...prev, phone: text }))}
+                  keyboardType="phone-pad"
+                />
+
+                <Text style={styles.inputLabel}>🛡️ Role</Text>
+                <View style={styles.roleSelector}>
+                  {(['user', 'responder', 'admin'] as const).map((role) => (
+                    <TouchableOpacity
+                      key={role}
+                      style={[styles.roleOption, profileForm.role === role && styles.roleOptionActive]}
+                      onPress={() => setProfileForm(prev => ({ ...prev, role }))}
+                      activeOpacity={0.85}
+                    >
+                      <Text style={[styles.roleOptionText, profileForm.role === role && styles.roleOptionTextActive]}>
+                        {role === 'admin' ? '⚡ Admin' : role === 'responder' ? '🚑 Responder' : '👤 User'}
+                      </Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+
+                {/* Current User Info (Read-only) */}
+                {editProfile && (
+                  <View style={styles.currentInfo}>
+                    <Text style={styles.currentInfoTitle}>📋 Current Information</Text>
+                    <Text style={styles.currentInfoText}>🆔 ID: {editProfile.id}</Text>
+                    <Text style={styles.currentInfoText}>📅 Joined: {editProfile.createdAt ? new Date(editProfile.createdAt).toLocaleDateString() : 'Unknown'}</Text>
+                  </View>
+                )}
+              </View>
+            </ScrollView>
+
+      {/* Profile Modal */}
+      
+
+
+            {/* Action Buttons */}
+            <View style={styles.modalActionRow}>
+              <TouchableOpacity style={styles.modalCancelBtn} onPress={cancelProfileEdit}>
+                <Text style={styles.modalCancelText}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.modalSaveBtn} onPress={saveProfile}>
+                <Text style={styles.modalSaveText}>Save Changes</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>

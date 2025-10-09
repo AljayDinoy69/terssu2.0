@@ -16,32 +16,26 @@ export type ThemeContextType = {
 const ThemeContext = createContext<ThemeContextType | undefined>(undefined);
 
 export const ThemeProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const [mode, setModeState] = useState<AppTheme>('system');
-  const [systemScheme, setSystemScheme] = useState<Exclude<ColorSchemeName, 'no-preference'> | null>(Appearance.getColorScheme() as any);
+  const [mode, setModeState] = useState<AppTheme>('dark');
+  const [systemScheme, setSystemScheme] = useState<Exclude<ColorSchemeName, 'no-preference'> | null>('dark');
 
   useEffect(() => {
-    (async () => {
-      const pref = await getAppTheme();
-      setModeState(pref);
-    })();
+    setModeState('dark');
+    setAppTheme('dark');
   }, []);
 
   useEffect(() => {
-    const sub = Appearance.addChangeListener(({ colorScheme }) => {
-      setSystemScheme(colorScheme as any);
+    const sub = Appearance.addChangeListener(() => {
+      setSystemScheme('dark');
     });
     return () => sub.remove();
   }, []);
 
-  const theme: 'light' | 'dark' = useMemo(() => {
-    if (mode === 'light') return 'light';
-    if (mode === 'dark') return 'dark';
-    return (systemScheme || 'light') === 'dark' ? 'dark' : 'light';
-  }, [mode, systemScheme]);
+  const theme: 'light' | 'dark' = 'dark';
 
-  const setMode = async (m: AppTheme) => {
-    setModeState(m);
-    await setAppTheme(m);
+  const setMode = async (_m: AppTheme) => {
+    setModeState('dark');
+    await setAppTheme('dark');
   };
 
   const colors = useMemo(() => ({

@@ -132,6 +132,7 @@ app.post('/auth/login', async (req, res) => {
     const { email, password } = req.body || {};
     const acc = await Account.findOne({ email: String(email).toLowerCase(), password });
     if (!acc) return res.status(401).json({ error: 'Invalid email or password' });
+    if (acc.restricted) return res.status(403).json({ error: 'This account has been restricted. Contact your administrator.' });
     // For mock, return user object directly. In real app, issue JWT
     res.json({ user: sanitizeAccount(acc) });
   } catch (err) {
@@ -659,3 +660,4 @@ async function start() {
 }
 
 start();
+

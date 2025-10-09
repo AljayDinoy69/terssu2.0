@@ -1,5 +1,7 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useLayoutEffect } from 'react';
 import { View, Text, TextInput, StyleSheet, TouchableOpacity, Alert, ScrollView, Animated, Dimensions, TextInputProps, ImageBackground } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
+import { Ionicons } from '@expo/vector-icons';
 import { PasswordInput } from '../components/PasswordInput';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { RootStackParamList } from '../navigation/AppNavigator';
@@ -26,6 +28,10 @@ export default function SignupScreen({ navigation }: SignupProps) {
   ).current;
   const buttonScale = useRef(new Animated.Value(0.9)).current;
   const progressAnim = useRef(new Animated.Value(0)).current;
+
+  useLayoutEffect(() => {
+    navigation.setOptions({ headerShown: false });
+  }, [navigation]);
 
   useEffect(() => {
     // Entrance animations
@@ -122,11 +128,6 @@ export default function SignupScreen({ navigation }: SignupProps) {
     }
   };
 
-  const getFieldIcon = (index: number) => {
-    const icons = ['👤', '📧', '📱', '🔒', '🔐'];
-    return icons[index];
-  };
-
   const getFieldLabel = (index: number) => {
     const labels = ['Full Name', 'Email Address', 'Phone Number', 'Password', 'Confirm Password'];
     return labels[index];
@@ -166,8 +167,19 @@ export default function SignupScreen({ navigation }: SignupProps) {
       style={styles.bg}
       resizeMode="cover"
     >
-      <View style={styles.container}>
-        <View style={styles.backgroundPattern} />
+      <SafeAreaView style={styles.safeArea} edges={['top']}>
+        <View style={styles.header}>
+          <TouchableOpacity
+            style={styles.headerBackButton}
+            onPress={() => navigation.reset({ index: 0, routes: [{ name: 'Home' }] })}
+            activeOpacity={0.7}
+          >
+            <Ionicons name="arrow-back" size={24} color="#fff" />
+            <Text style={styles.headerTitle}>Signup</Text>
+          </TouchableOpacity>
+        </View>
+        <View style={styles.container}>
+          <View style={styles.backgroundPattern} />
         
         <ScrollView contentContainerStyle={styles.scrollContainer} showsVerticalScrollIndicator={false}>
         {/* Animated Title */}
@@ -214,7 +226,7 @@ export default function SignupScreen({ navigation }: SignupProps) {
             >
               <View style={styles.inputContainer}>
                 <Text style={styles.inputLabel}>
-                  {getFieldIcon(index)} {getFieldLabel(index)}
+                   {getFieldLabel(index)}
                 </Text>
                 {props.secureTextEntry ? (
                   <PasswordInput
@@ -222,9 +234,12 @@ export default function SignupScreen({ navigation }: SignupProps) {
                     onChangeText={props.onChange}
                     placeholder={getPlaceholder(index)}
                     style={[
-                      styles.input,
+                      styles.passwordInputContainer,
                       props.value.length > 0 && styles.inputFilled
                     ]}
+                    inputStyle={styles.passwordInputField}
+                    darkMode
+                    showSuccess={props.value.length > 0}
                   />
                 ) : (
                   <TextInput
@@ -240,7 +255,7 @@ export default function SignupScreen({ navigation }: SignupProps) {
                     keyboardType={props.keyboardType}
                   />
                 )}
-                {props.value.length > 0 && (
+                {!props.secureTextEntry && props.value.length > 0 && (
                   <View style={styles.inputSuccess}>
                     <Text style={styles.successIcon}>✓</Text>
                   </View>
@@ -282,7 +297,7 @@ export default function SignupScreen({ navigation }: SignupProps) {
             >
               <View style={styles.buttonContent}>
                 <Text style={styles.btnText}>
-                  {loading ? '⏳ Creating Account...' : '🚀 Create Account'}
+                  {loading ? '⏳ Creating Account...' : ' Create Account'}
                 </Text>
                 {!loading && (name && email && phone && password && confirm && password === confirm) && (
                   <View style={styles.buttonGlow} />
@@ -299,7 +314,10 @@ export default function SignupScreen({ navigation }: SignupProps) {
             onPress={() => navigation.navigate('Login')}
             activeOpacity={0.7}
           >
-            <Text style={styles.linkText}>👤 Already have an account? Login</Text>
+            <Text style={styles.linkText}>
+              Already have an account?{' '}
+              <Text style={styles.linkHighlight}> Login</Text>
+            </Text>
           </TouchableOpacity>
         </View>
 
@@ -318,12 +336,30 @@ export default function SignupScreen({ navigation }: SignupProps) {
           </Text>
         </Animated.View>
         </ScrollView>
-      </View>
+        </View>
+      </SafeAreaView>
     </ImageBackground>
   );
 }
 
 const styles = StyleSheet.create({
+  safeArea: {
+    flex: 1,
+  },
+  header: {
+    paddingHorizontal: 24,
+    paddingBottom: 12,
+  },
+  headerBackButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  headerTitle: {
+    color: '#fff',
+    fontSize: 20,
+    fontWeight: '700',
+    marginLeft: 8,
+  },
   container: {
     flex: 1,
     backgroundColor: 'transparent',
@@ -410,6 +446,16 @@ const styles = StyleSheet.create({
   },
   inputFilled: {
     borderColor: '#d90429',
+  },
+  passwordInputContainer: {
+    backgroundColor: '#1a1a2e',
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#333',
+  },
+  passwordInputField: {
+    color: '#fff',
+    paddingVertical: 10,
   },
   inputSuccess: {
     position: 'absolute',
@@ -510,13 +556,15 @@ const styles = StyleSheet.create({
     paddingHorizontal: 18,
     borderRadius: 8,
     backgroundColor: 'rgba(255, 255, 255, 0.05)',
-    marginBottom: 12,
-    width: '100%',
   },
   linkText: {
-    color: '#667eea',
+    color: '#ebebebff',
     textAlign: 'center',
     fontWeight: '600',
     fontSize: 16,
   },
-});
+  linkHighlight: {
+    color: '#d90429',
+    fontWeight: 'bold',
+  },
+}); 

@@ -1,9 +1,8 @@
-import React, { useEffect, useRef, useState } from 'react';
-import { View, Text, StyleSheet, Image, TouchableOpacity, Animated, ScrollView, ImageBackground, Modal, FlatList, Platform } from 'react-native';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
+import { View, Text, StyleSheet, Image, TouchableOpacity, Animated, ScrollView, ImageBackground, Modal, FlatList } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { RootStackParamList } from '../navigation/AppNavigator';
-import api from '../utils/api';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { getCurrentUser, listNotifications, markNotificationRead } from '../utils/auth';
 import { playNotificationSound } from '../utils/sound';
@@ -11,8 +10,6 @@ import { API_BASE_URL } from '../utils/api';
 import { useTheme } from '../components/ThemeProvider';
 
 export type HomeProps = NativeStackScreenProps<RootStackParamList, 'Home'>;
-
-// removed unused width
 
 export default function HomeScreen({ navigation }: HomeProps) {
   const { colors } = useTheme();
@@ -39,6 +36,20 @@ export default function HomeScreen({ navigation }: HomeProps) {
   const userRef = useRef<any>(null);
   const deviceIdRef = useRef<string | null>(null);
 
+  const ensureAnonymousDeviceId = useCallback(async () => {
+    let current = deviceIdRef.current;
+    if (!current) {
+      current = await AsyncStorage.getItem('ERS_DEVICE_ID');
+    }
+    if (!current) {
+      current = `device_${Date.now()}_${Math.random().toString(36).slice(2, 11)}`;
+      await AsyncStorage.setItem('ERS_DEVICE_ID', current);
+      console.log('Generated new anonymous device ID:', current);
+    }
+    deviceIdRef.current = current;
+    return current;
+  }, []);
+
   useEffect(() => {
     let es: any = null;
     let pollTimer: any = null;
@@ -51,9 +62,9 @@ export default function HomeScreen({ navigation }: HomeProps) {
         let currentDeviceId: string | null = null;
 
         if (!user) {
-          // For anonymous users, get device ID
-          currentDeviceId = await AsyncStorage.getItem('ERS_DEVICE_ID');
-          deviceIdRef.current = currentDeviceId;
+          currentDeviceId = await ensureAnonymousDeviceId();
+        } else {
+          deviceIdRef.current = null;
         }
 
         console.log('SSE Setup - User:', user, 'DeviceId:', currentDeviceId); // Debug log
@@ -85,7 +96,7 @@ export default function HomeScreen({ navigation }: HomeProps) {
                   // For registered users
                   isRelevant = true;
                   console.log('Update relevant to registered user:', user.id); // Debug log
-                } else if (!user && report.deviceId === currentDeviceId) {
+                } else if (!user && currentDeviceId && report.deviceId === currentDeviceId) {
                   // For anonymous users
                   isRelevant = true;
                   console.log('Update relevant to anonymous user with deviceId:', currentDeviceId); // Debug log
@@ -140,7 +151,7 @@ export default function HomeScreen({ navigation }: HomeProps) {
       }
       if (pollTimer) clearInterval(pollTimer);
     };
-  }, []);
+  }, [ensureAnonymousDeviceId]);
 
   useEffect(() => {
     // Entrance animations
@@ -229,14 +240,15 @@ export default function HomeScreen({ navigation }: HomeProps) {
         notifications = await listNotifications(user.id);
       } else {
         // For anonymous users, get device ID and fetch device-specific notifications
-        const deviceId = await AsyncStorage.getItem('ERS_DEVICE_ID');
+        const deviceId = await ensureAnonymousDeviceId();
         console.log('Anonymous user - Device ID from storage:', deviceId); // Debug log
 
         if (deviceId) {
           console.log('Fetching notifications for anonymous user with deviceId:', deviceId); // Debug log
           notifications = await listNotifications(undefined, deviceId);
         } else {
-          console.log('No device ID found for anonymous user'); // Debug log
+          console.log('No device ID available for anonymous user; skipping fetch'); // Debug log
+          return;
         }
       }
 
@@ -374,8 +386,8 @@ export default function HomeScreen({ navigation }: HomeProps) {
             transform: [{ translateY: slideAnim }],
           }}
         >
-          <Text style={[styles.title, { color: colors.text }]}>ERS</Text>
-          <Text style={[styles.subtitle, { color: colors.text, opacity: 0.85 }]}>Emergency Response System</Text>
+          <Text style={styles.title}>ERS</Text>
+          <Text style={styles.subtitle}>Emergency Response System</Text>
         </Animated.View>
         
         {/* Animated logo */}
@@ -406,7 +418,7 @@ export default function HomeScreen({ navigation }: HomeProps) {
             transform: [{ translateY: slideAnim }],
           }}
         >
-        <Text style={[styles.subtitle1, { color: colors.text, opacity: 0.85 }]}>Direct Report Here!</Text>
+        <Text style={styles.subtitle1}>Direct Report Here!</Text>
         </Animated.View>
 
         {/* Animated buttons */}
@@ -418,7 +430,7 @@ export default function HomeScreen({ navigation }: HomeProps) {
               activeOpacity={0.8}
             >
               <View style={styles.buttonContent}>
-                <Text style={styles.btnText}>👤 Login</Text>
+                <Text style={styles.btnText}>Login</Text>
                 <View style={styles.buttonHighlight} pointerEvents="none" />
               </View>
             </TouchableOpacity>
@@ -431,7 +443,7 @@ export default function HomeScreen({ navigation }: HomeProps) {
               activeOpacity={0.8}
             >
               <View style={styles.buttonContent}>
-                <Text style={[styles.btnText, { color: colors.text }]}>✨ Signup</Text>
+                <Text style={styles.btnText}>Signup</Text>
                 <View style={styles.buttonHighlight} pointerEvents="none" />
               </View>
             </TouchableOpacity>
@@ -442,24 +454,24 @@ export default function HomeScreen({ navigation }: HomeProps) {
           <View style={[styles.infoCard, styles.cardShadow]}> 
             <Text style={styles.infoIcon}>🕒</Text>
             <View style={styles.infoTextWrap}>
-              <Text style={[styles.infoTitle, { color: colors.text }]}>24/7 Availability</Text>
-              <Text style={[styles.infoDesc, { color: colors.text + '99' }]}>Report incidents anytime, anywhere with reliable uptime.</Text>
+              <Text style={styles.infoTitle}>24/7 Availability</Text>
+              <Text style={styles.infoDesc}>Report incidents anytime, anywhere with reliable uptime.</Text>
             </View>
           </View>
 
           <View style={[styles.infoCard, styles.cardShadow]}>
             <Text style={styles.infoIcon}>📍</Text>
             <View style={styles.infoTextWrap}>
-              <Text style={[styles.infoTitle, { color: colors.text }]}>Accurate Geolocation</Text>
-              <Text style={[styles.infoDesc, { color: colors.text + '99' }]}>Share precise location to speed up emergency response.</Text>
+              <Text style={styles.infoTitle}>Accurate Geolocation</Text>
+              <Text style={styles.infoDesc}>Share precise location to speed up emergency response.</Text>
             </View>
           </View>
 
           <View style={[styles.infoCard, styles.cardShadow]}>
             <Text style={styles.infoIcon}>🔒</Text>
             <View style={styles.infoTextWrap}>
-              <Text style={[styles.infoTitle, { color: colors.text }]}>Privacy First</Text>
-              <Text style={[styles.infoDesc, { color: colors.text + '99' }]}>Report anonymously or securely with your account.</Text>
+              <Text style={styles.infoTitle}>Privacy First</Text>
+              <Text style={styles.infoDesc}>Report anonymously or securely with your account.</Text>
             </View>
           </View>
         </View>
@@ -480,7 +492,7 @@ export default function HomeScreen({ navigation }: HomeProps) {
             onPress={toggleNotificationModal}
           >
             <View style={styles.modalContentWrapper}>
-              <View style={styles.notificationModal}>
+              <View style={[styles.notificationModal, { backgroundColor: colors.background }]}>
                 <View style={styles.modalHeader}>
                   <Text style={[styles.modalTitle, { color: colors.text }]}>Notifications</Text>
                   <TouchableOpacity
@@ -572,11 +584,11 @@ const styles = StyleSheet.create({
     width: 50,
     height: 50,
     borderRadius: 25,
-    backgroundColor: 'rgba(255, 255, 255, 0.2)',
+    backgroundColor: 'rgba(17, 21, 42, 0.7)',
     justifyContent: 'center',
     alignItems: 'center',
     borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.3)',
+    borderColor: 'rgba(255, 255, 255, 0.2)',
   },
   notificationBellWithBadge: {
     // Add slight glow effect when there are notifications
@@ -585,6 +597,7 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.5,
     shadowRadius: 10,
     elevation: 10,
+    borderColor: 'rgba(255, 87, 87, 0.6)',
   },
   bellIcon: {
     fontSize: 24,
@@ -610,7 +623,7 @@ const styles = StyleSheet.create({
   },
   modalOverlay: {
     flex: 1,
-    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    backgroundColor: 'rgba(4, 6, 12, 0.75)',
     justifyContent: 'center',
     alignItems: 'center',
     position: 'absolute',
@@ -635,20 +648,18 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
   },
   notificationModal: {
-    backgroundColor: '#fff',
+    backgroundColor: '#11152a',
     borderRadius: 20,
     padding: 0,
-    width: '90%',
-    maxWidth: 400,
+    width: '100%',
     maxHeight: '70%',
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 10 },
     shadowOpacity: 0.25,
     shadowRadius: 20,
     elevation: 10,
-    // Ensure modal is always centered
-    alignSelf: 'center',
-    marginHorizontal: 'auto',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.08)',
   },
   modalHeader: {
     flexDirection: 'row',
@@ -656,24 +667,26 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     padding: 20,
     borderBottomWidth: 1,
-    borderBottomColor: '#e0e0e0',
+    borderBottomColor: 'rgba(255,255,255,0.08)',
   },
   modalTitle: {
     fontSize: 20,
     fontWeight: 'bold',
-    color: '#333',
+    color: '#fff',
   },
   closeButton: {
     width: 30,
     height: 30,
     borderRadius: 15,
-    backgroundColor: '#f0f0f0',
+    backgroundColor: 'rgba(255,255,255,0.08)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.12)',
     justifyContent: 'center',
     alignItems: 'center',
   },
   closeButtonText: {
     fontSize: 16,
-    color: '#666',
+    color: '#fff',
     fontWeight: 'bold',
   },
   notificationItem: {
@@ -681,11 +694,11 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     padding: 15,
     borderBottomWidth: 1,
-    borderBottomColor: '#f0f0f0',
-    backgroundColor: '#fff',
+    borderBottomColor: 'rgba(255,255,255,0.08)',
+    backgroundColor: 'rgba(255,255,255,0.04)',
   },
   readNotification: {
-    backgroundColor: '#f9f9f9',
+    backgroundColor: 'rgba(255,255,255,0.02)',
   },
   notificationContent: {
     flex: 1,
@@ -694,18 +707,18 @@ const styles = StyleSheet.create({
   notificationTitle: {
     fontSize: 16,
     fontWeight: 'bold',
-    color: '#333',
+    color: '#fff',
     marginBottom: 5,
   },
   notificationMessage: {
     fontSize: 14,
-    color: '#666',
+    color: '#c9cde4',
     marginBottom: 5,
     lineHeight: 18,
   },
   notificationTimestamp: {
     fontSize: 12,
-    color: '#999',
+    color: '#9aa0c2',
   },
   unreadIndicator: {
     width: 8,
@@ -720,18 +733,18 @@ const styles = StyleSheet.create({
   },
   expandIcon: {
     fontSize: 12,
-    color: '#666',
+    color: '#c9cde4',
     marginTop: 5,
   },
   expandedNotification: {
-    backgroundColor: '#f8f9fa',
+    backgroundColor: 'rgba(255,255,255,0.03)',
     borderTopWidth: 1,
-    borderTopColor: '#e9ecef',
+    borderTopColor: 'rgba(255,255,255,0.08)',
     padding: 15,
   },
   expandedDetails: {
     fontSize: 14,
-    color: '#555',
+    color: '#d6dbff',
     lineHeight: 20,
     marginBottom: 15,
   },
@@ -741,17 +754,17 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     paddingTop: 10,
     borderTopWidth: 1,
-    borderTopColor: '#e9ecef',
+    borderTopColor: 'rgba(255,255,255,0.08)',
   },
   expandedTimestamp: {
     fontSize: 12,
-    color: '#888',
+    color: '#9aa0c2',
     flex: 1,
   },
   readStatus: {
     fontSize: 12,
     fontWeight: 'bold',
-    color: '#28a745',
+    color: '#3ddc97',
   },
   noNotifications: {
     padding: 40,
@@ -760,7 +773,7 @@ const styles = StyleSheet.create({
   },
   noNotificationsText: {
     fontSize: 16,
-    color: '#666',
+    color: '#d6dbff',
     textAlign: 'center',
   },
   /* notification styles removed */
@@ -862,7 +875,7 @@ const styles = StyleSheet.create({
     borderColor: '#4a4e69',
   },
   tertiaryBtn: {
-    backgroundColor: 'transparent',
+    backgroundColor: 'rgba(102, 126, 234, 0.2)',
     paddingVertical: 16,
     paddingHorizontal: 24,
     borderRadius: 25,

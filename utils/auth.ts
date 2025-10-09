@@ -12,6 +12,7 @@ export type Account = {
   password?: string; // optional: server does not return password
   photoUrl?: string;
   avatarUrl?: string;
+  restricted?: boolean;
 };
 
 export type ReportStatus = 'Pending' | 'In-progress' | 'Resolved';
@@ -94,6 +95,9 @@ export async function signUpUser({ name, email, password, phone }: { name: strin
 export async function login(email: string, password: string) {
   // Use server API
   const { user } = await api.post<{ user: Account }>('/auth/login', { email, password });
+  if (user?.restricted) {
+    throw new Error('This account has been restricted. Contact your administrator for assistance.');
+  }
   await AsyncStorage.setItem(KEYS.session, JSON.stringify({ id: user.id, user }));
   return user;
 }

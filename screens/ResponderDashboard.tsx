@@ -272,20 +272,25 @@ export default function ResponderDashboard({ navigation }: ResponderDashProps) {
         Alert.alert('Invalid location', 'This report does not have a valid incident location.');
         return;
       }
-      const { lat, lon } = loc;
-      const apple = `http://maps.apple.com/?daddr=${lat},${lon}`;
-      const google = `https://www.google.com/maps/dir/?api=1&destination=${lat},${lon}`;
-      const target = Platform.OS === 'ios' ? apple : google;
+    
+      setMapError(null);
+      setIncidentCoord(loc);
+    
       try {
-        const supported = await Linking.canOpenURL(target);
-        if (supported) {
-          await Linking.openURL(target);
+        const { status } = await Location.requestForegroundPermissionsAsync();
+        if (status === 'granted') {
+          const current = await Location.getCurrentPositionAsync({});
+          setMyCoord({ lat: current.coords.latitude, lon: current.coords.longitude });
         } else {
-          await Linking.openURL(google);
+          setMapError('Location permission not granted');
+          setMyCoord(null);
         }
-      } catch (e) {
-        Alert.alert('Unable to open maps', 'Please open your maps app manually.');
+      } catch (error: any) {
+        setMapError(error?.message || 'Unable to get current location');
+        setMyCoord(null);
       }
+    
+      setMapOpen(true);
     };
     // Remove clicked notification and close dropdown
     // Mark as read on server if unread
@@ -328,10 +333,10 @@ export default function ResponderDashboard({ navigation }: ResponderDashProps) {
 
   const getStatusIcon = (status: string) => {
     switch (status?.toLowerCase()) {
-      case 'pending': return '⏳';
-      case 'in-progress': return '🚀';
-      case 'resolved': return '✅';
-      default: return '❓';
+      case 'pending': return '';
+      case 'in-progress': return '';
+      case 'resolved': return '';
+      default: return '';
     }
   };
 
@@ -341,6 +346,30 @@ export default function ResponderDashboard({ navigation }: ResponderDashProps) {
 
   // Determine list based on selected tab
   const activeList = activeTab === 'pending' ? pending : activeTab === 'active' ? active : completed;
+
+  // const openExternalMaps = async (report: Report) => {
+  //   const loc = parseLocation(report.location);
+  //   if (!loc) {
+  //     Alert.alert('Invalid location', 'This report does not have a valid incident location.');
+  //     return;
+  //   }
+
+  //   const { lat, lon } = loc;
+  //   const apple = `http://maps.apple.com/?daddr=${lat},${lon}`;
+  //   const google = `https://www.google.com/maps/dir/?api=1&destination=${lat},${lon}`;
+  //   const preferred = Platform.OS === 'ios' ? apple : google;
+
+  //   try {
+  //     const canOpenPreferred = await Linking.canOpenURL(preferred);
+  //     if (canOpenPreferred) {
+  //       await Linking.openURL(preferred);
+  //     } else {
+  //       await Linking.openURL(google);
+  //     }
+  //   } catch {
+  //     Alert.alert('Unable to open maps', 'Please open your maps app manually.');
+  //   }
+  // };
 
   // Parse "lat, lon" string
   const parseLocation = (text?: string): { lat: number; lon: number } | null => {
@@ -391,9 +420,13 @@ export default function ResponderDashboard({ navigation }: ResponderDashProps) {
     setMapOpen(true);
   };
 
-  function openExternalMaps(detailReport: Report) {
-    throw new Error('Function not implemented.');
-  }
+  const avatarUri = currentUser?.photoUrl || currentUser?.avatarUrl;
+  const initials = currentUser?.name
+    ?.split(' ')
+    .map((part: any[]) => part[0])
+    .join('')
+    .slice(0, 2)
+    .toUpperCase() || '?';
 
   return (
     <View style={[styles.container, { backgroundColor: colors.background }]}>
@@ -401,11 +434,27 @@ export default function ResponderDashboard({ navigation }: ResponderDashProps) {
 
       {/* Header */}
       <View style={styles.header}> 
-        <View style={styles.headerContent}>
-          <Text style={[styles.title, { color: colors.text }]}>🚑 Responder Dashboard</Text>
-          <Text style={[styles.subtitle, { color: colors.text, opacity: 0.8 }]}>Emergency Response Management</Text>
-          {/* Debug: show avatar URL used */}
-          <Text style={styles.debugUrl} numberOfLines={1}>{String(currentUser?.avatarUrl || currentUser?.photoUrl || '')}</Text>
+        <View style={styles.headerIdentity}>
+          <TouchableOpacity
+            onPress={() => setProfileModalVisible(true)}
+            activeOpacity={0.85}
+          >
+            {avatarUri ? (
+              <Image source={{ uri: avatarUri }} style={styles.headerAvatar} />
+            ) : (
+              <View style={styles.headerAvatarFallback}>
+                <Text style={styles.headerAvatarText}>{initials}</Text>
+              </View>
+            )}
+          </TouchableOpacity>
+          <View style={styles.headerNameBlock}>
+            <Text style={[styles.headerName, { color: colors.text }]} numberOfLines={1}>
+              {currentUser?.name || 'Responder'}
+            </Text>
+            <Text style={[styles.headerRole, { color: colors.text + '88' }]}>
+              {currentUser?.role === 'responder' ? 'Responder Dashboard' : (currentUser?.role || '')}
+            </Text>
+          </View>
         </View>
         <View style={styles.headerActions}>
           <View style={{ position: 'relative' }}>
@@ -544,21 +593,21 @@ export default function ResponderDashboard({ navigation }: ResponderDashProps) {
               onPress={() => { setMenuOpen(false); setProfileModalVisible(true); }}
               activeOpacity={0.7}
             >
-              <Text style={styles.menuItemText}>👤 Profile</Text>
+              <Text style={styles.menuItemText}>Profile</Text>
             </TouchableOpacity>
             <TouchableOpacity 
               style={styles.menuItem} 
               onPress={() => { setMenuOpen(false); setSettingsOpen(true); }}
               activeOpacity={0.7}
             >
-              <Text style={styles.menuItemText}>⚙️ Settings</Text>
+              <Text style={styles.menuItemText}>Settings</Text>
             </TouchableOpacity>
             <TouchableOpacity 
               style={styles.menuItem} 
               onPress={() => { setMenuOpen(false); Alert.alert('About & Services', 'Coming soon'); }}
               activeOpacity={0.7}
             >
-              <Text style={styles.menuItemText}>ℹ️ About & Services</Text>
+              <Text style={styles.menuItemText}>About & Services</Text>
             </TouchableOpacity>
 
             <View style={styles.menuDivider} />
@@ -567,7 +616,7 @@ export default function ResponderDashboard({ navigation }: ResponderDashProps) {
               onPress={() => { setMenuOpen(false); onLogout(); }}
               activeOpacity={0.7}
             >
-              <Text style={[styles.menuItemText, { color: '#fff' }]}>🚪 Logout</Text>
+              <Text style={[styles.menuItemText, { color: '#fff' }]}>Logout</Text>
             </TouchableOpacity>
           </Animated.View>
         </Animated.View>
@@ -576,32 +625,32 @@ export default function ResponderDashboard({ navigation }: ResponderDashProps) {
       <ScrollView 
         style={styles.scrollContainer} 
         showsVerticalScrollIndicator={false}
-        contentContainerStyle={{ paddingBottom: 90, paddingTop: 20 }} // Add padding to prevent content from being hidden behind the footer
+        contentContainerStyle={{ paddingBottom: 90, paddingTop: 20 }} 
       >
         {/* Content Area */}
       {activeTab === 'analytics' ? (
         <View style={styles.analyticsContainer}>
-          <Text style={styles.sectionTitle}>📊 Response Analytics</Text>
+          <Text style={styles.sectionTitle}>Response Analytics</Text>
           
           {/* Stats Overview */}
           <View style={styles.statsGrid}>
             <View style={[styles.statCard, { backgroundColor: '#ff980020' }]}>
               <Text style={styles.statNumber}>{pending.length}</Text>
-              <Text style={styles.statLabel}>⏳ Pending</Text>
+              <Text style={styles.statLabel}>Pending</Text>
             </View>
             <View style={[styles.statCard, { backgroundColor: '#2196f320' }]}>
               <Text style={styles.statNumber}>{active.length}</Text>
-              <Text style={styles.statLabel}>🚀 In Progress</Text>
+              <Text style={styles.statLabel}>In Progress</Text>
             </View>
             <View style={[styles.statCard, { backgroundColor: '#4caf5020' }]}>
               <Text style={styles.statNumber}>{completed.length}</Text>
-              <Text style={styles.statLabel}>✅ Resolved</Text>
+              <Text style={styles.statLabel}>Resolved</Text>
             </View>
           </View>
           
           {/* Response Time */}
           <View style={styles.analyticsSection}>
-            <Text style={styles.analyticsTitle}>⏱️ Average Response Time</Text>
+            <Text style={styles.analyticsTitle}>Average Response Time</Text>
             <View style={styles.analyticsCard}>
               <Text style={styles.analyticsValue}>24 min</Text>
               <Text style={styles.analyticsSubtitle}>From report to first response</Text>
@@ -610,7 +659,7 @@ export default function ResponderDashboard({ navigation }: ResponderDashProps) {
           
           {/* Completion Rate */}
           <View style={styles.analyticsSection}>
-            <Text style={styles.analyticsTitle}>📈 Completion Rate</Text>
+            <Text style={styles.analyticsTitle}>Completion Rate</Text>
             <View style={styles.analyticsCard}>
               <Text style={styles.analyticsValue}>
                 {reports.length > 0 ? Math.round((completed.length / reports.length) * 100) : 0}%
@@ -621,7 +670,7 @@ export default function ResponderDashboard({ navigation }: ResponderDashProps) {
           
           {/* Activity Timeline */}
           <View style={styles.analyticsSection}>
-            <Text style={styles.analyticsTitle}>📅 Recent Activity</Text>
+            <Text style={styles.analyticsTitle}>Recent Activity</Text>
             <View style={[styles.analyticsCard, { padding: 0 }]}>
               {reports.slice(0, 3).map((report, index) => (
                 <View key={report.id} style={[styles.activityItem, index > 0 && styles.activityItemBorder]}>
@@ -653,7 +702,6 @@ export default function ResponderDashboard({ navigation }: ResponderDashProps) {
         <View style={styles.listWrap}>
           {activeList.length === 0 ? (
             <View style={styles.emptyState}>
-              <Text style={styles.emptyIcon}>📭</Text>
               <Text style={styles.emptyText}>No reports in this tab</Text>
             </View>
           ) : (
@@ -684,9 +732,10 @@ export default function ResponderDashboard({ navigation }: ResponderDashProps) {
           onPress={() => setActiveTab('pending')}
           activeOpacity={0.7}
         >
-          <Text style={[styles.footerIcon, activeTab === 'pending' && styles.activeFooterIcon]}>
-            {activeTab === 'pending' ? '⏳' : '⏱️'}
-          </Text>
+          <Image
+            source={require('../assets/icons/wall-clock.png')}
+            style={[styles.footerIconImage, activeTab === 'pending' && styles.activeFooterIconImage]}
+          />
           <Text style={[styles.footerText, activeTab === 'pending' && styles.activeFooterText]}>Pending</Text>
         </TouchableOpacity>
         
@@ -695,9 +744,10 @@ export default function ResponderDashboard({ navigation }: ResponderDashProps) {
           onPress={() => setActiveTab('active')}
           activeOpacity={0.7}
         >
-          <Text style={[styles.footerIcon, activeTab === 'active' && styles.activeFooterIcon]}>
-            {activeTab === 'active' ? '🚀' : '⚡'}
-          </Text>
+          <Image
+            source={require('../assets/icons/activities.png')}
+            style={[styles.footerIconImage, activeTab === 'active' && styles.activeFooterIconImage]}
+          />
           <Text style={[styles.footerText, activeTab === 'active' && styles.activeFooterText]}>Active</Text>
         </TouchableOpacity>
         
@@ -706,9 +756,10 @@ export default function ResponderDashboard({ navigation }: ResponderDashProps) {
           onPress={() => setActiveTab('completed')}
           activeOpacity={0.7}
         >
-          <Text style={[styles.footerIcon, activeTab === 'completed' && styles.activeFooterIcon]}>
-            {activeTab === 'completed' ? '✅' : '✔️'}
-          </Text>
+          <Image
+            source={require('../assets/icons/completed-task.png')}
+            style={[styles.footerIconImage, activeTab === 'completed' && styles.activeFooterIconImage]}
+          />
           <Text style={[styles.footerText, activeTab === 'completed' && styles.activeFooterText]}>Completed</Text>
         </TouchableOpacity>
         
@@ -717,9 +768,10 @@ export default function ResponderDashboard({ navigation }: ResponderDashProps) {
           onPress={() => setActiveTab('analytics')}
           activeOpacity={0.7}
         >
-          <Text style={[styles.footerIcon, activeTab === 'analytics' && styles.activeFooterIcon]}>
-            {activeTab === 'analytics' ? '📊' : '📈'}
-          </Text>
+          <Image
+            source={require('../assets/icons/data-analytics.png')}
+            style={[styles.footerIconImage, activeTab === 'analytics' && styles.activeFooterIconImage]}
+          />
           <Text style={[styles.footerText, activeTab === 'analytics' && styles.activeFooterText]}>Analytics</Text>
         </TouchableOpacity>
       </View>
@@ -733,6 +785,13 @@ export default function ResponderDashboard({ navigation }: ResponderDashProps) {
       >
         <View style={styles.modalOverlay}>
           <View style={styles.modalContent}>
+          <TouchableOpacity
+            style={styles.modalCloseIconBtn}
+            onPress={() => setDetailReport(null)}
+            activeOpacity={0.8}
+          >
+            <Text style={styles.modalCloseIconText}>✖</Text>
+          </TouchableOpacity>
             <Text style={[styles.modalTitle, { color: colors.text }]}>Report Details</Text>
             {!!detailReport && (
               <ScrollView style={styles.modalScroll} showsVerticalScrollIndicator={false}>
@@ -795,24 +854,22 @@ export default function ResponderDashboard({ navigation }: ResponderDashProps) {
 
             <View style={styles.modalActionsRow}>
               <TouchableOpacity style={styles.viewBtn} onPress={() => detailReport && openLocationModal(detailReport)}>
-                <Text style={styles.viewBtnText}>🗺️ View Location</Text>
+                <Text style={styles.viewBtnText}>View Location</Text>
               </TouchableOpacity>
-              <TouchableOpacity style={styles.cancelBtn} onPress={() => setDetailReport(null)}>
-                <Text style={styles.cancelBtnText}>Close</Text>
-              </TouchableOpacity>
+
               {!!detailReport && detailReport.status !== 'Resolved' && (
                 <TouchableOpacity
                   style={styles.deleteBtn}
                   onPress={async () => {
                     if (detailReport.status === 'Pending') {
-                      await openExternalMaps(detailReport);
+                      await openLocationModal(detailReport);
                     }
                     await onAdvance(detailReport.id, detailReport.status);
                     setDetailReport(null);
                   }}
                 >
                   <Text style={styles.deleteBtnText}>
-                    {detailReport.status === 'Pending' ? '▶️ Start Progress' : '✅ Mark Resolved'}
+                    {detailReport.status === 'Pending' ? 'Start Progress' : 'Mark Resolved'}
                   </Text>
                 </TouchableOpacity>
               )}
@@ -862,6 +919,13 @@ export default function ResponderDashboard({ navigation }: ResponderDashProps) {
       >
         <View style={styles.modalOverlay}>
           <View style={styles.mapModalContent}>
+          <TouchableOpacity
+            style={styles.modalCloseIconBtn}
+            onPress={() => setMapOpen(false)}
+            activeOpacity={0.8}
+          >
+            <Text style={styles.modalCloseIconText}>✖</Text>
+          </TouchableOpacity>
             <Text style={[styles.modalTitle, { color: colors.text }]}>Incident & My Location</Text>
             {mapError ? (
               <Text style={styles.mapErrorText}>⚠️ {mapError}</Text>
@@ -883,11 +947,6 @@ export default function ResponderDashboard({ navigation }: ResponderDashProps) {
               {incidentCoord && myCoord ? (
                 <Text style={[styles.mapLegendText, { color: colors.text + '99' }]}>📏 Distance: {distanceKm(incidentCoord, myCoord).toFixed(2)} km</Text>
               ) : null}
-            </View>
-            <View style={styles.modalActionsRow}>
-              <TouchableOpacity style={styles.cancelBtn} onPress={() => setMapOpen(false)}>
-                <Text style={styles.cancelBtnText}>Close</Text>
-              </TouchableOpacity>
             </View>
           </View>
         </View>
@@ -937,19 +996,44 @@ const styles = StyleSheet.create({
     borderBottomColor: '#333',
     zIndex: 100 
   },
-  headerContent: {
-    flex: 1,
+  headerIdentity: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    marginLeft: 16,
   },
-  title: { 
-    fontSize: 24, 
-    fontWeight: '900', 
+  headerAvatar: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    borderWidth: 2,
+    borderColor: '#667eea',
+  },
+  headerAvatarFallback: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: '#2b2f4a',
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 2,
+    borderColor: '#667eea',
+  },
+  headerAvatarText: {
     color: '#fff',
-    letterSpacing: 1,
+    fontWeight: '800',
+    fontSize: 16,
   },
-  subtitle: {
-    fontSize: 14,
-    color: '#a0a0a0',
-    marginTop: 4,
+  headerNameBlock: {
+    maxWidth: 150,
+  },
+  headerName: {
+    fontSize: 16,
+    fontWeight: '800',
+  },
+  headerRole: {
+    fontSize: 12,
+    fontWeight: '600',
   },
   debugUrl: {
     color: '#7f9cf5',
@@ -1105,6 +1189,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     flexWrap: 'wrap',
     gap: 12,
+    paddingBottom: 15,
   },
   statCard: {
     flex: 1,
@@ -1248,10 +1333,6 @@ const styles = StyleSheet.create({
     borderColor: '#333',
     borderStyle: 'dashed',
   },
-  emptyIcon: {
-    fontSize: 48,
-    marginBottom: 12,
-  },
   emptyText: {
     fontSize: 16,
     color: '#999',
@@ -1325,24 +1406,27 @@ const styles = StyleSheet.create({
   },
   mapModalContent: {
     backgroundColor: '#1a1a2e',
-    padding: 16,
-    borderRadius: 12,
+    padding: 20,
+    borderRadius: 16,
     borderWidth: 1,
     borderColor: '#333',
-    width: Math.min(width * 0.9, 340),
+    width: width,
+    maxWidth: '100%',
+    maxHeight: height,
+    alignSelf: 'stretch',
+    marginHorizontal: -10, // optional: cancel overlay padding if you keep it
   },
   mapBox: {
-    height: 180,
-    borderRadius: 10,
+    borderRadius: 14,
     borderWidth: 1,
     borderColor: '#333',
     backgroundColor: '#0f0f23',
-    marginTop: 8,
-    marginBottom: 12,
+    marginTop: 12,
+    marginBottom: 16,
     overflow: 'hidden',
-    position: 'relative',
     alignSelf: 'center',
-    width: 260,
+    width: Math.min(width * 0.96, width - 60),
+    height: Math.min(height * 0.65, height - 160),
   },
   marker: {
     position: 'absolute',
@@ -1394,6 +1478,7 @@ const styles = StyleSheet.create({
     // Constrain overall modal height to keep actions visible on small screens
     maxHeight: Math.min(height * 0.8, 720),
     padding: 16,
+    paddingTop: 48,
   },
   // Scroll area inside modal adapts to screen height
   modalScroll: {
@@ -1403,13 +1488,13 @@ const styles = StyleSheet.create({
     color: '#fff',
     fontSize: 16,
     fontWeight: '800',
-    marginBottom: 12,
     paddingVertical: 8,
     paddingHorizontal: 10,
     borderRadius: 8,
     borderWidth: 1,
     borderColor: '#333',
     backgroundColor: '#111',
+    marginTop: 30,
   },
   // Modal detail rows (stack label above value)
   modalRow: {
@@ -1515,8 +1600,7 @@ const styles = StyleSheet.create({
   activeFooterText: {
     color: '#667eea',
     fontWeight: '700',
-  },
-  // Full-screen image viewer styles
+  }, 
   viewerOverlay: {
     flex: 1,
     backgroundColor: 'rgba(0,0,0,0.95)'
@@ -1547,7 +1631,7 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   collageItem: {
-    width: (width - 16 - 16 - 8) / 2, // roughly 2 columns inside modal padding
+    width: (width - 16 - 16 - 8) / 2, 
     maxWidth: '48%',
     aspectRatio: 1,
     borderRadius: 10,
@@ -1570,5 +1654,28 @@ const styles = StyleSheet.create({
     color: '#fff',
     fontWeight: '800',
     fontSize: 18,
+  },
+  footerIconImage: {
+    width: 24,
+    height: 24,
+    marginBottom: 4,
+    tintColor: '#888',
+    resizeMode: 'contain',
+  },
+  activeFooterIconImage: {
+    tintColor: '#667eea',
+  },
+  modalCloseIconBtn: {
+    position: 'absolute',
+    top: 12,
+    right: 12,
+    padding: 6,
+    zIndex: 10,
+    elevation: 6,         
+  },
+  modalCloseIconText: {
+    color: '#fff',
+    fontSize: 18,
+    fontWeight: '800',
   },
 });

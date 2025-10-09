@@ -2,12 +2,10 @@ import React, { useEffect, useState, useRef } from 'react';
 import { View, Text, StyleSheet, FlatList, TouchableOpacity, TextInput, Alert, Animated, Dimensions, ScrollView, Image, Modal, InteractionManager } from 'react-native';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { RootStackParamList } from '../navigation/AppNavigator';
-import { createResponder, deleteAccount, getCurrentUser, listAllReports, listUsers, logout, listNotifications, markNotificationRead, deleteNotification, markAllNotificationsRead, Notification as NotificationItem, listResponders } from '../utils/auth';
+import { createResponder, deleteAccount, getCurrentUser, listAllReports, listUsers, logout, listNotifications, markNotificationRead, deleteNotification, markAllNotificationsRead, Notification as NotificationItem, listResponders, updateAccount } from '../utils/auth';
 import { API_BASE_URL } from '../utils/api';
 import { playNotificationSound } from '../utils/sound';
 import { isSoundEnabled, setSoundEnabled, getNotificationFrequency, NotificationFrequency } from '../utils/settings';
-import ProfileModal from './ProfileModal';
-import SettingsModal from '../components/SettingsModal';
 import { useTheme } from '../components/ThemeProvider';
 
 export type AdminDashProps = NativeStackScreenProps<RootStackParamList, 'AdminDashboard'>;
@@ -15,6 +13,12 @@ export type AdminDashProps = NativeStackScreenProps<RootStackParamList, 'AdminDa
 // Server-backed notifications
 
 const { width } = Dimensions.get('window');
+
+const TAB_ICONS = {
+  users: require('../assets/icons/profile-user.png'),
+  reports: require('../assets/icons/file.png'),
+  analytics: require('../assets/icons/data-analytics.png'),
+};
 
 export default function AdminDashboard({ navigation }: AdminDashProps) {
   const { colors } = useTheme();
@@ -24,14 +28,13 @@ export default function AdminDashboard({ navigation }: AdminDashProps) {
   const [form, setForm] = useState({ name: '', email: '', phone: '', password: 'responder123' });
   const [activeTab, setActiveTab] = useState<'users' | 'reports' | 'analytics'>('users');
   const [userQuery, setUserQuery] = useState('');
-  const [roleFilter, setRoleFilter] = useState<'all' | 'admin' | 'responder' | 'user'>('all');
   const [menuOpen, setMenuOpen] = useState(false);
   const [soundEnabled, setSoundEnabledState] = useState<boolean>(true);
   const [detailUser, setDetailUser] = useState<any | null>(null);
   const [confirmTarget, setConfirmTarget] = useState<{ id: string; name: string } | null>(null);
-  const [userSort, setUserSort] = useState<'name_asc' | 'name_desc' | 'role' | 'email'>('name_asc');
+  const [roleFilter, setRoleFilter] = useState<'all' | 'user' | 'responder' | 'admin'>('all');
+  const [roleDropdownOpen, setRoleDropdownOpen] = useState(false);
   const [reportSort, setReportSort] = useState<'all' | 'pending' | 'in-progress' | 'resolved'>('all');
-  const [userSortDropdown, setUserSortDropdown] = useState(false);
   const [reportSortDropdown, setReportSortDropdown] = useState(false);
   const prevPendingRef = useRef<number>(0);
   const didInitRef = useRef<boolean>(false);
@@ -51,7 +54,6 @@ export default function AdminDashboard({ navigation }: AdminDashProps) {
   });
   const [profileModalVisible, setProfileModalVisible] = useState(false);
   const [currentUser, setCurrentUser] = useState<any>(null);
-  const [settingsOpen, setSettingsOpen] = useState(false);
   const [notificationFreq, setNotificationFreq] = useState<NotificationFrequency>('normal');
   const [imageViewerVisible, setImageViewerVisible] = useState(false);
   const [imageViewerUri, setImageViewerUri] = useState<string | null>(null);
@@ -69,6 +71,21 @@ export default function AdminDashboard({ navigation }: AdminDashProps) {
       unique.forEach((u) => prefetchedRef.current.add(u));
     } catch {}
   };
+
+  const openUserDetails = (userId: string) => {
+    const fresh = users.find(u => u.id === userId);
+    if (fresh) {
+      setDetailUser(fresh);
+    }
+  };
+
+  useEffect(() => {
+    if (!detailUser) return;
+    const fresh = users.find(u => u.id === detailUser.id);
+    if (fresh && JSON.stringify(fresh) !== JSON.stringify(detailUser)) {
+      setDetailUser(fresh);
+    }
+  }, [users]);
   
   const openImageViewer = (images: string[] | string, startIndex: number = 0) => {
     if (Array.isArray(images)) {
@@ -288,7 +305,6 @@ export default function AdminDashboard({ navigation }: AdminDashProps) {
 
     const me = await getCurrentUser();
     if (!me || me.role !== 'admin') return navigation.replace('Login');
-    setCurrentUser(me);
     // Load sound preference
     try {
       const pref = await isSoundEnabled();
@@ -300,6 +316,14 @@ export default function AdminDashboard({ navigation }: AdminDashProps) {
       setNotificationFreq(freq);
     } catch {}
     const [usersList, responders] = await Promise.all([listUsers(), listResponders()]);
+    const meLatest = usersList.find((u: any) => u.id === me.id) || me;
+    if (meLatest?.restricted) {
+      Alert.alert('Access Restricted', 'Your account has been restricted by an administrator.');
+      await logout();
+      navigation.reset({ index: 0, routes: [{ name: 'Home' }] });
+      return;
+    }
+    setCurrentUser(meLatest);
     setUsers(usersList);
     // Build a map of id -> name for both users and responders
     const map: Record<string, string> = {};
@@ -359,18 +383,15 @@ export default function AdminDashboard({ navigation }: AdminDashProps) {
     await logout();
     navigation.reset({ index: 0, routes: [{ name: 'Home' }] });
   };
-
   // Profile editing functions
   const openProfileEdit = async () => {
     try {
       const me = await getCurrentUser();
-      if (me) {
-        setCurrentUser(me);
-        setProfileModalVisible(true);
-        setMenuOpen(false);
-      }
-    } catch (error) {
-      Alert.alert('Error', 'Failed to load profile information');
+      if (!me) throw new Error('Unable to load current user');
+      setProfileForm({ name: me.name || '', email: me.email || '', phone: me.phone || '', role: me.role || 'admin' });
+      setProfileModalVisible(true);
+    } catch (error: any) {
+      Alert.alert('Error', error?.message || 'Unable to open profile editor');
     }
   };
 
@@ -437,10 +458,10 @@ export default function AdminDashboard({ navigation }: AdminDashProps) {
 
   const getStatusIcon = (status: string) => {
     switch (status?.toLowerCase()) {
-      case 'pending': return '⏳';
-      case 'in-progress': return '🚀';
-      case 'resolved': return '✅';
-      default: return '❓';
+      case 'pending': return;
+      case 'in-progress': return;
+      case 'resolved': return;
+      default: return;
     }
   };
 
@@ -503,47 +524,43 @@ export default function AdminDashboard({ navigation }: AdminDashProps) {
 
   const getRoleIcon = (role: string) => {
     switch (role?.toLowerCase()) {
-      case 'admin': return '⚡';
-      case 'responder': return '🚑';
-      case 'user': return '👤';
-      default: return '❓';
+      case 'admin': return;
+      case 'responder': return;
+      case 'user': return;
+      default: return;
     }
   };
 
 const stats = getStatsData();
 
 const renderUserCard = ({ item }: { item: any; index: number }) => (
-  <View style={styles.card}>
-    <View style={styles.cardHeader}>
-      <View style={styles.roleContainer}>
-        <Text style={styles.roleIcon}>{getRoleIcon(item.role)}</Text>
-        <View style={[styles.roleBadge, { backgroundColor: item.role === 'admin' ? '#d90429' : '#667eea' }]}>
-          <Text style={styles.roleBadgeText}>{item.role?.toUpperCase?.() || 'UNKNOWN'}</Text>
-        </View>
-      </View>
+  <View style={styles.userCard}>
+    <View style={styles.userCardHeader}>
+      <Text style={[styles.rolePill, item.role === 'admin' ? styles.rolePillAdmin : item.role === 'responder' ? styles.rolePillResponder : styles.rolePillUser]}>
+        {item.role?.charAt(0)?.toUpperCase() + item.role?.slice(1) || 'Unknown'}
+      </Text>
     </View>
-
-    <Text style={styles.cardTitle}>{item.name}</Text>
-    {!!item.email && <Text style={styles.cardMeta}>📧 {item.email}</Text>}
-    {!!item.phone && <Text style={styles.cardMeta}>📱 {item.phone}</Text>}
-
-    <View style={styles.actionRow}>
+    <Text style={styles.userCardTitle} numberOfLines={1}>{item.name || 'Unnamed User'}</Text>
+    {!!item.email && (
+      <View style={styles.userCardRow}>
+        <Text style={styles.userCardIcon}>Email:</Text>
+        <Text style={styles.userCardMeta} numberOfLines={1}>{item.email}</Text>
+      </View>
+    )}
+    {!!item.phone && (
+      <View style={styles.userCardRow}>
+        <Text style={styles.userCardIcon}>Contact No:</Text>
+        <Text style={styles.userCardMeta} numberOfLines={1}>{item.phone}</Text>
+      </View>
+    )}
+    <View style={styles.userCardFooter}>
       <TouchableOpacity
         style={styles.viewBtn}
-        onPress={() => setDetailUser(item)}
+        onPress={() => openUserDetails(item.id)}
         activeOpacity={0.85}
       >
-        <Text style={styles.viewBtnText}>👁️ View Details</Text>
+        <Text style={styles.viewBtnText}>View Details</Text>
       </TouchableOpacity>
-      {item.role !== 'admin' && (
-        <TouchableOpacity
-          style={styles.deleteBtn}
-          onPress={() => setConfirmTarget({ id: item.id, name: item.name })}
-          activeOpacity={0.85}
-        >
-          <Text style={styles.deleteBtnText}>🗑️ Delete</Text>
-        </TouchableOpacity>
-      )}
     </View>
   </View>
 );
@@ -561,12 +578,12 @@ const renderReportCard = ({ item }: { item: any; index: number }) => (
 
     {!!item.chiefComplaint && (
       <Text style={styles.reportDescription} numberOfLines={2} ellipsizeMode="tail">
-        🆘 Chief Complaint: {item.chiefComplaint}
+        Chief Complaint:  {item.chiefComplaint}
       </Text>
     )}
     {!!item.description && (
       <Text style={styles.reportDescription} numberOfLines={3} ellipsizeMode="tail">
-        📝 {item.description}
+        Description:  {item.description}
       </Text>
     )}
         {Array.isArray((item as any).photoUrls) && (item as any).photoUrls.length > 0 ? (
@@ -601,31 +618,31 @@ const renderReportCard = ({ item }: { item: any; index: number }) => (
     <View style={styles.reportDetails}>
       {!!item.fullName && (
         <Text style={styles.reportMeta} numberOfLines={1} ellipsizeMode="tail">
-          🙍 Full Name: {item.fullName}
+          Full Name:  {item.fullName}
         </Text>
       )}
       {!!item.contactNo && (
         <Text style={styles.reportMeta} numberOfLines={1} ellipsizeMode="tail">
-          📞 Contact: {item.contactNo}
+          Contact:  {item.contactNo}
         </Text>
       )}
       {!!item.personsInvolved && (
         <Text style={styles.reportMeta} numberOfLines={1} ellipsizeMode="tail">
-          👥 Persons Involved: {item.personsInvolved}
+          Persons Involved:  {item.personsInvolved}
         </Text>
       )}
       <Text style={styles.reportMeta} numberOfLines={1} ellipsizeMode="tail">
-        👨‍⚕️ Responder{Array.isArray(item.responders) && item.responders.length > 1 ? 's' : ''}: {
+        Responder{Array.isArray(item.responders) && item.responders.length > 1 ? 's' : ''}: {
           Array.isArray(item.responders) && item.responders.length > 0
             ? item.responders.map((rid: string) => nameById(rid) || rid).join(', ')
             : (nameById(item.responderId) || 'Unassigned')
         }
       </Text>
       <Text style={styles.reportMeta} numberOfLines={1} ellipsizeMode="tail">
-        👤 Reporter: {item.fullName ? item.fullName : (item.userId ? (nameById(item.userId) || 'Anonymous') : 'Anonymous')}
+        Reporter:  {item.fullName ? item.fullName : (item.userId ? (nameById(item.userId) || 'Anonymous') : 'Anonymous')}
       </Text>
       <Text style={styles.reportMeta}>
-        📅 Created: {item.createdAt ? new Date(item.createdAt).toLocaleString() : '—'}
+        Created:  {item.createdAt ? new Date(item.createdAt).toLocaleString() : '—'}
       </Text>
     </View>
 
@@ -635,7 +652,7 @@ const renderReportCard = ({ item }: { item: any; index: number }) => (
       onPress={() => openReportDetails(item)}
       activeOpacity={0.85}
     >
-      <Text style={styles.viewDetailsBtnText}>👁️ View Full Details</Text>
+      <Text style={styles.viewDetailsBtnText}>View Full Details</Text>
     </TouchableOpacity>
   </View>
 );
@@ -646,7 +663,7 @@ return (
     {/* Header */}
     <Animated.View style={[styles.header, { transform: [{ scale: headerScale }] }]}> 
       <View style={styles.headerContent}>
-        <Text style={[styles.title, { color: colors.text }]}>⚡ Admin Dashboard</Text>
+        <Text style={[styles.title, { color: colors.text }]}>Admin Dashboard</Text>
         <Text style={[styles.subtitle, { color: colors.text, opacity: 0.8 }]}>Emergency Response Control</Text>
         {/* Debug: show avatar URL used */}
         <Text style={[styles.debugUrl, { color: colors.text }]} numberOfLines={1}>{String(currentUser?.avatarUrl || currentUser?.photoUrl || '')}</Text>
@@ -773,175 +790,89 @@ return (
         <View style={styles.menuOverlay} pointerEvents="box-none">
           <TouchableOpacity style={styles.menuBackdrop} activeOpacity={1} onPress={() => setMenuOpen(false)} />
           <View style={styles.menuContainer}>
-            <TouchableOpacity style={styles.menuItem} onPress={openProfileEdit}>
-              <Text style={styles.menuItemText}>👤 Profile</Text>
-            </TouchableOpacity>
-            <TouchableOpacity style={styles.menuItem} onPress={() => { setMenuOpen(false); setSettingsOpen(true); }}>
-              <Text style={styles.menuItemText}>⚙️ Settings</Text>
-            </TouchableOpacity>
             <TouchableOpacity style={styles.menuItem} onPress={() => { setMenuOpen(false); Alert.alert('About & Services', 'Coming soon'); }}>
-              <Text style={styles.menuItemText}>ℹ️ About & Services</Text>
+              <Text style={styles.menuItemText}>About & Services</Text>
             </TouchableOpacity>
             <View style={styles.menuDivider} />
             <TouchableOpacity style={[styles.menuItem, { backgroundColor: '#d90429' }]} onPress={() => { setMenuOpen(false); onLogout(); }}>
-              <Text style={[styles.menuItemText, { color: '#fff' }]}>🚪 Logout</Text>
+              <Text style={[styles.menuItemText, { color: '#fff' }]}>Logout</Text>
             </TouchableOpacity>
           </View>
         </View>
       )}
 
-      {/* Profile Edit Modal */}
-      <Modal visible={!!editProfile} transparent animationType="fade" onRequestClose={cancelProfileEdit}>
-        <View style={styles.modalOverlay}>
-          <View style={styles.modalContent}>
-            <Text style={styles.modalTitle}>👤 Edit Profile</Text>
-            <ScrollView showsVerticalScrollIndicator={false}>
-              {/* Profile Picture Placeholder */}
-              <View style={styles.profileAvatar}>
-                <Text style={styles.profileAvatarText}>
-                  {profileForm.name ? profileForm.name.charAt(0).toUpperCase() : '👤'}
-                </Text>
-              </View>
-
-              {/* Form Fields */}
-              <View style={styles.formContainer}>
-                <Text style={styles.inputLabel}>👤 Full Name</Text>
-                <TextInput
-                  style={[styles.input, profileForm.name && styles.inputFilled]}
-                  placeholder="Enter your full name"
-                  placeholderTextColor="#888"
-                  value={profileForm.name}
-                  onChangeText={(text) => setProfileForm(prev => ({ ...prev, name: text }))}
-                  autoCapitalize="words"
-                />
-
-                <Text style={styles.inputLabel}>📧 Email Address</Text>
-                <TextInput
-                  style={[styles.input, profileForm.email && styles.inputFilled]}
-                  placeholder="Enter your email"
-                  placeholderTextColor="#888"
-                  value={profileForm.email}
-                  onChangeText={(text) => setProfileForm(prev => ({ ...prev, email: text }))}
-                  keyboardType="email-address"
-                  autoCapitalize="none"
-                />
-
-                <Text style={styles.inputLabel}>📱 Phone Number</Text>
-                <TextInput
-                  style={[styles.input, profileForm.phone && styles.inputFilled]}
-                  placeholder="Enter your phone number"
-                  placeholderTextColor="#888"
-                  value={profileForm.phone}
-                  onChangeText={(text) => setProfileForm(prev => ({ ...prev, phone: text }))}
-                  keyboardType="phone-pad"
-                />
-
-                <Text style={styles.inputLabel}>🛡️ Role</Text>
-                <View style={styles.roleSelector}>
-                  {(['user', 'responder', 'admin'] as const).map((role) => (
-                    <TouchableOpacity
-                      key={role}
-                      style={[styles.roleOption, profileForm.role === role && styles.roleOptionActive]}
-                      onPress={() => setProfileForm(prev => ({ ...prev, role }))}
-                      activeOpacity={0.85}
-                    >
-                      <Text style={[styles.roleOptionText, profileForm.role === role && styles.roleOptionTextActive]}>
-                        {role === 'admin' ? '⚡ Admin' : role === 'responder' ? '🚑 Responder' : '👤 User'}
-                      </Text>
-                    </TouchableOpacity>
-                  ))}
-                </View>
-
-                {/* Current User Info (Read-only) */}
-                {editProfile && (
-                  <View style={styles.currentInfo}>
-                    <Text style={styles.currentInfoTitle}>📋 Current Information</Text>
-                    <Text style={styles.currentInfoText}>🆔 ID: {editProfile.id}</Text>
-                    <Text style={styles.currentInfoText}>📅 Joined: {editProfile.createdAt ? new Date(editProfile.createdAt).toLocaleDateString() : 'Unknown'}</Text>
-                  </View>
-                )}
-              </View>
-            </ScrollView>
-
-      {/* Profile Modal */}
-      <ProfileModal
-        visible={profileModalVisible}
-        onClose={() => setProfileModalVisible(false)}
-        user={currentUser}
-        onProfileUpdated={(u) => { setCurrentUser(u); setProfileModalVisible(false); }}
-        onAccountDeleted={() => { setProfileModalVisible(false); }}
-        navigation={navigation}
-      />
-
-      {/* Settings Modal */}
-      <SettingsModal
-        visible={settingsOpen}
-        onClose={() => setSettingsOpen(false)}
-        soundEnabled={soundEnabled}
-        onToggleSound={async (next) => { setSoundEnabledState(next); await setSoundEnabled(next); }}
-      />
-
-      
-
-
-            {/* Action Buttons */}
-            <View style={styles.modalActionRow}>
-              <TouchableOpacity style={styles.modalCancelBtn} onPress={cancelProfileEdit}>
-                <Text style={styles.modalCancelText}>Cancel</Text>
-              </TouchableOpacity>
-              <TouchableOpacity style={styles.modalSaveBtn} onPress={saveProfile}>
-                <Text style={styles.modalSaveText}>Save Changes</Text>
-              </TouchableOpacity>
-            </View>
-          </View>
-        </View>
-      </Modal>
-
       {/* User Details Modal */}
       <Modal visible={!!detailUser} transparent animationType="fade" onRequestClose={() => setDetailUser(null)}>
-        <View style={styles.container}>
-          <View style={styles.backgroundPattern} />
-          <View style={styles.header}>
-            <View style={styles.headerContent}>
-              <Text style={styles.title}>Admin Dashboard</Text>
-              <Text style={styles.subtitle}>Manage users, reports, and analytics</Text>
-            </View>
-            <View style={styles.headerActions}>
-              <TouchableOpacity
-                style={styles.bellBtn}
-                onPress={() => setNotifOpen(true)}
-              >
-                <Text style={styles.bellIcon}>🔔</Text>
-                {unseen > 0 && (
-                  <View style={styles.badge}>
-                    <Text style={styles.badgeText}>{unseen}</Text>
-                  </View>
-                )}
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={styles.menuBtn}
-                onPress={() => setMenuOpen(true)}
-              >
-                <Text style={styles.menuBtnText}>☰</Text>
-              </TouchableOpacity>
-            </View>
-          </View>
-        </View>
         <View style={styles.modalOverlay}>
           <View style={styles.modalContent}>
-            <Text style={styles.modalTitle}>👤 User Details</Text>
+            <TouchableOpacity style={styles.modalCloseIconBtn} onPress={() => setDetailUser(null)}>
+              <Text style={styles.modalCloseIconText}>✖</Text>
+            </TouchableOpacity>
+            <Text style={styles.modalTitle}>User Details</Text>
             {detailUser && (
               <View>
-                <Text style={styles.modalRow}>🆔 ID: {detailUser.id}</Text>
-                <Text style={styles.modalRow}>👤 Name: {detailUser.name}</Text>
-                <Text style={styles.modalRow}>📧 Email: {detailUser.email}</Text>
-                <Text style={styles.modalRow}>📱 Phone: {detailUser.phone}</Text>
-                <Text style={styles.modalRow}>🛡️ Role: {detailUser.role}</Text>
+                <Text style={styles.modalRow}>ID: {detailUser.id}</Text>
+                <Text style={styles.modalRow}>Name: {detailUser.name}</Text>
+                <Text style={styles.modalRow}>Email: {detailUser.email}</Text>
+                <Text style={styles.modalRow}>Phone: {detailUser.phone}</Text>
+                <Text style={styles.modalRow}>Role: {detailUser.role}</Text>
+                <View style={styles.restrictRow}>
+                  <View>
+                    <Text style={styles.restrictTitle}>Restrict Access</Text>
+                    <Text style={styles.restrictSubtitle}>Prevent user from logging into the system.</Text>
+                  </View>
+                  <TouchableOpacity
+                    style={[styles.restrictToggle, detailUser?.restricted ? styles.restrictToggleActive : null]}
+                    onPress={async () => {
+                      if (!detailUser) return;
+                      try {
+                        const toggledRestricted = !Boolean(detailUser.restricted);
+                        const updated = await updateAccount(detailUser.id, { restricted: toggledRestricted });
+                        const merged = {
+                          ...detailUser,
+                          ...updated,
+                          restricted: typeof updated?.restricted === 'boolean' ? updated.restricted : toggledRestricted,
+                        };
+                        setDetailUser(merged);
+                        setUsers(prev => prev.map(u => (u.id === merged.id ? merged : u)));
+                        if (merged.id === currentUser?.id) {
+                          if (merged.restricted) {
+                            Alert.alert('Access Restricted', 'Your account has been restricted. You will be logged out.');
+                            await logout();
+                            navigation.reset({ index: 0, routes: [{ name: 'Home' }] });
+                            return;
+                          }
+                          setCurrentUser(merged);
+                        }
+                      } catch (err: any) {
+                        Alert.alert('Update failed', err?.message || 'Unable to update restriction');
+                      }
+                    }}
+                    activeOpacity={0.8}
+                  >
+                    <View style={[styles.restrictThumb, detailUser?.restricted ? styles.restrictThumbActive : null]} />
+                  </TouchableOpacity>
+                </View>
+                {detailUser?.restricted && (
+                  <Text style={styles.restrictNotice}>This user is currently restricted from logging in.</Text>
+                )}
               </View>
             )}
-            <TouchableOpacity style={styles.modalCloseBtn} onPress={() => setDetailUser(null)}>
-              <Text style={styles.modalCloseText}>Close</Text>
-            </TouchableOpacity>
+            <View style={styles.modalActionRow}>
+              {detailUser?.role !== 'admin' && (
+                <TouchableOpacity
+                  style={styles.modalDeleteBtn}
+                  onPress={() => {
+                    if (!detailUser) return;
+                    setDetailUser(null);
+                    setConfirmTarget({ id: detailUser.id, name: detailUser.name });
+                  }}
+                  activeOpacity={0.8}
+                >
+                  <Text style={styles.modalDeleteText}>Delete User</Text>
+                </TouchableOpacity>
+              )}
+            </View>
           </View>
         </View>
       </Modal>
@@ -1046,20 +977,20 @@ return (
       >
         <View style={styles.modalOverlay}>
           <View style={styles.modalContent}>
-            <Text style={styles.modalTitle}>📋 Report Details</Text>
+            <Text style={styles.modalTitle}>Report Details</Text>
             {!!detailReport && (
               <ScrollView showsVerticalScrollIndicator={false}>
-                {detailReport.id ? (<Text style={styles.modalRow}>🆔 ID: {detailReport.id}</Text>) : null}
-                {detailReport.type ? (<Text style={styles.modalRow}>🏷️ Type: {detailReport.type}</Text>) : null}
-                {detailReport.status ? (<Text style={styles.modalRow}>📍 Status: {detailReport.status}</Text>) : null}
-                {detailReport.chiefComplaint ? (<Text style={styles.modalRow}>🆘 Chief Complaint: {detailReport.chiefComplaint}</Text>) : null}
-                {detailReport.description ? (<Text style={styles.modalRow}>📝 Description: {detailReport.description}</Text>) : null}
-                {detailReport.fullName ? (<Text style={styles.modalRow}>🙍 Full Name: {detailReport.fullName}</Text>) : null}
-                {detailReport.contactNo ? (<Text style={styles.modalRow}>📞 Contact: {detailReport.contactNo}</Text>) : null}
-                {detailReport.personsInvolved ? (<Text style={styles.modalRow}>👥 Persons Involved: {detailReport.personsInvolved}</Text>) : null}
+                {detailReport.id ? (<Text style={styles.modalRow}>ID: {detailReport.id}</Text>) : null}
+                {detailReport.type ? (<Text style={styles.modalRow}>Type: {detailReport.type}</Text>) : null}
+                {detailReport.status ? (<Text style={styles.modalRow}>Status: {detailReport.status}</Text>) : null}
+                {detailReport.chiefComplaint ? (<Text style={styles.modalRow}>Chief Complaint: {detailReport.chiefComplaint}</Text>) : null}
+                {detailReport.description ? (<Text style={styles.modalRow}>Description: {detailReport.description}</Text>) : null}
+                {detailReport.fullName ? (<Text style={styles.modalRow}>Full Name: {detailReport.fullName}</Text>) : null}
+                {detailReport.contactNo ? (<Text style={styles.modalRow}>Contact: {detailReport.contactNo}</Text>) : null}
+                {detailReport.personsInvolved ? (<Text style={styles.modalRow}>Persons Involved: {detailReport.personsInvolved}</Text>) : null}
                 {(detailReport.responders || detailReport.responderId) ? (
                   <Text style={styles.modalRow}>
-                    👨‍⚕️ Responder{Array.isArray(detailReport.responders) && detailReport.responders.length > 1 ? 's' : ''}: {
+                    Responder{Array.isArray(detailReport.responders) && detailReport.responders.length > 1 ? 's' : ''}: {
                       Array.isArray(detailReport.responders) && detailReport.responders.length > 0
                         ? detailReport.responders.map((rid: string) => nameById(rid) || rid).join(', ')
                         : (nameById(detailReport.responderId) || 'Unassigned')
@@ -1067,18 +998,18 @@ return (
                   </Text>
                 ) : null}
                 <Text style={styles.modalRow}>
-                  👤 Reporter: {detailReport.fullName ? detailReport.fullName : (detailReport.userId ? (nameById(detailReport.userId) || 'Anonymous') : 'Anonymous')}
+                  Reporter: {detailReport.fullName ? detailReport.fullName : (detailReport.userId ? (nameById(detailReport.userId) || 'Anonymous') : 'Anonymous')}
                 </Text>
                 {detailReport.createdAt ? (
-                  <Text style={styles.modalRow}>📅 Created: {new Date(detailReport.createdAt).toLocaleString()}</Text>
+                  <Text style={styles.modalRow}>Created: {new Date(detailReport.createdAt).toLocaleString()}</Text>
                 ) : null}
                 {detailReport.updatedAt ? (
-                  <Text style={styles.modalRow}>🔄 Updated: {new Date(detailReport.updatedAt).toLocaleString()}</Text>
+                  <Text style={styles.modalRow}>Updated: {new Date(detailReport.updatedAt).toLocaleString()}</Text>
                 ) : null}
 
                 {Array.isArray((detailReport as any).photoUrls) && (detailReport as any).photoUrls.length > 0 ? (
                   <View style={{ marginTop: 12 }}>
-                    <Text style={styles.modalRow}>📸 Photos:</Text>
+                    <Text style={styles.modalRow}>Photos:</Text>
                     <View style={styles.collageGrid}>
                       {((detailReport as any).photoUrls as string[]).slice(0, 4).map((uri, idx) => (
                         <TouchableOpacity
@@ -1100,7 +1031,7 @@ return (
                 ) : (
                   detailReport.photoUrl ? (
                     <View style={{ marginTop: 12 }}>
-                      <Text style={styles.modalRow}>📸 Photo:</Text>
+                      <Text style={styles.modalRow}>Photo:</Text>
                       <TouchableOpacity activeOpacity={0.9} onPress={() => openImageViewer(detailReport.photoUrl as string)}>
                         <Image source={{ uri: detailReport.photoUrl }} style={styles.thumbnail} resizeMode="cover" />
                       </TouchableOpacity>
@@ -1119,7 +1050,7 @@ return (
       <ScrollView 
         style={styles.scrollContainer} 
         showsVerticalScrollIndicator={false}
-        contentContainerStyle={{ paddingBottom: 90, paddingTop: 20 }} // Add padding to prevent content from being hidden behind the footer
+        contentContainerStyle={{ paddingBottom: 90, paddingTop: 20 }} 
       >
 
         {/* Users Management (Tab) */}
@@ -1137,7 +1068,7 @@ return (
             <Text style={styles.sectionSubtitle}>Manage all users and emergency responders with full CRUD operations.</Text>
             <View style={{ flexDirection: 'row', gap: 12, marginBottom: 12, alignItems: 'center' }}>
               <TouchableOpacity style={[styles.addBtn]} onPress={() => navigation.navigate('AdminCreateUsers')}>
-                <Text style={styles.addBtnText}>➕ Add User</Text>
+                <Text style={styles.addBtnText}>Add User</Text>
               </TouchableOpacity>
             </View>
             <TextInput
@@ -1147,64 +1078,55 @@ return (
               value={userQuery}
               onChangeText={setUserQuery}
             />
-            <View style={styles.filterRow}>
-              {(['all','admin','responder','user'] as const).map(r => (
-                <TouchableOpacity key={r} style={[styles.chip, roleFilter===r && styles.chipActive]} onPress={() => setRoleFilter(r)}>
-                  <Text style={[styles.chipText, roleFilter===r && styles.chipTextActive]}>{r}</Text>
-                </TouchableOpacity>
-              ))}
-            </View>
-            <View style={styles.filterRow}>
-              <Text style={styles.sortLabel}>Sort by:</Text>
-              <View style={{ position: 'relative' }}>
+            <View style={[styles.filterRow, { zIndex: roleDropdownOpen ? 2000 : 1 }]}>
+              <View style={{ position: 'relative', flex: 1 }}>
                 <TouchableOpacity
-                  style={[styles.sortDropdownBtn, userSortDropdown && styles.sortDropdownBtnActive]}
-                  onPress={() => setUserSortDropdown(!userSortDropdown)}
+                  style={[styles.sortDropdownBtn, styles.sortDropdownBtnCentered, roleDropdownOpen && styles.sortDropdownBtnActive]}
+                  onPress={() => setRoleDropdownOpen(prev => !prev)}
                   activeOpacity={0.85}
                 >
-                  <Text style={styles.sortDropdownBtnText}>
+                  <Text style={[styles.sortDropdownBtnText, styles.filterPrefix]}>Filter:</Text>
+                  <Text style={[styles.sortDropdownBtnText, styles.sortDropdownBtnTextCentered]}>
                     {(() => {
-                      switch (userSort) {
-                        case 'name_asc': return '👤 Name A-Z';
-                        case 'name_desc': return '👤 Name Z-A';
-                        case 'role': return '🛡️ Role';
-                        case 'email': return '📧 Email';
-                        default: return '👤 Name A-Z';
+                      switch (roleFilter) {
+                        case 'all':
+                          return 'All Users';
+                        case 'user':
+                          return 'Regular Users';
+                        case 'responder':
+                          return 'Responders';
+                        case 'admin':
+                          return 'Admin';
+                        default:
+                          return 'All Users';
                       }
                     })()}
                   </Text>
-                  <Text style={styles.dropdownArrow}>▼</Text>
+                  <Text style={[styles.dropdownArrow, styles.dropdownArrowOverlay]}>▼</Text>
                 </TouchableOpacity>
 
-                {userSortDropdown && (
+                {roleDropdownOpen && (
                   <>
-                    <TouchableOpacity 
-                      style={styles.dropdownBackdrop} 
-                      activeOpacity={1} 
-                      onPress={() => setUserSortDropdown(false)}
+                    <TouchableOpacity
+                      style={styles.dropdownBackdrop}
+                      activeOpacity={1}
+                      onPress={() => setRoleDropdownOpen(false)}
                     />
-                    <View style={[styles.dropdown, { top: 44, right: 0, width: 180, zIndex: 5000, elevation: 60 }]}>
-                      {[
-                        { key: 'name_asc', label: '👤 Name A-Z' },
-                        { key: 'name_desc', label: '👤 Name Z-A' },
-                        { key: 'role', label: '🛡️ Role' },
-                        { key: 'email', label: '📧 Email' },
-                      ].map((option) => (
+                    <View style={[styles.dropdown, styles.dropdownFullWidth]}>
+                      {[{ key: 'all', label: 'All Users' }, { key: 'user', label: 'Regular Users' }, { key: 'responder', label: 'Responders' }, { key: 'admin', label: 'Admin' }].map(option => (
                         <TouchableOpacity
                           key={option.key}
-                          style={[styles.dropdownItem, userSort === option.key && styles.dropdownItemActive]}
+                          style={[styles.dropdownItem, roleFilter === option.key && styles.dropdownItemActive]}
                           onPress={() => {
-                            setUserSort(option.key as any);
-                            setUserSortDropdown(false);
+                            setRoleFilter(option.key as typeof roleFilter);
+                            setRoleDropdownOpen(false);
                           }}
                           activeOpacity={0.85}
                         >
-                          <Text style={[styles.dropdownItemText, userSort === option.key && styles.dropdownItemTextActive]}>
+                          <Text style={[styles.dropdownItemText, roleFilter === option.key && styles.dropdownItemTextActive]}>
                             {option.label}
                           </Text>
-                          {userSort === option.key && (
-                            <Text style={styles.dropdownCheck}>✓</Text>
-                          )}
+                          {roleFilter === option.key && <Text style={styles.dropdownCheck}>✓</Text>}
                         </TouchableOpacity>
                       ))}
                     </View>
@@ -1214,28 +1136,17 @@ return (
             </View>
             {(() => {
               const q = userQuery.trim().toLowerCase();
-              const filtered = users.filter(u => (
-                (roleFilter==='all' ? true : u.role === roleFilter) &&
-                (!q || u.name?.toLowerCase().includes(q) || u.email?.toLowerCase().includes(q))
-              ));
+              const filtered = users.filter(u => {
+                const matchesRole = roleFilter === 'all' ? true : (roleFilter === 'user' ? u.role === 'user' : u.role === roleFilter);
+                const matchesQuery = !q || u.name?.toLowerCase().includes(q) || u.email?.toLowerCase().includes(q);
+                return matchesRole && matchesQuery;
+              });
               const sorted = [...filtered].sort((a, b) => {
                 const safe = (v: any) => (typeof v === 'string' ? v.toLowerCase() : v || '');
-                switch (userSort) {
-                  case 'name_asc':
-                    return safe(a.name).localeCompare(safe(b.name));
-                  case 'name_desc':
-                    return safe(b.name).localeCompare(safe(a.name));
-                  case 'role':
-                    return safe(a.role).localeCompare(safe(b.role)) || safe(a.name).localeCompare(safe(b.name));
-                  case 'email':
-                    return safe(a.email).localeCompare(safe(b.email));
-                  default:
-                    return 0;
-                }
+                return safe(a.name).localeCompare(safe(b.name));
               });
               return filtered.length === 0 ? (
                 <View style={styles.emptyState}>
-                  <Text style={styles.emptyIcon}>🔎</Text>
                   <Text style={styles.emptyText}>No matching users</Text>
                 </View>
               ) : (
@@ -1262,30 +1173,35 @@ return (
               },
             ]}
           >
-            <Text style={styles.sectionTitle}>📋 Emergency Reports ({reports.length})</Text>
+            <Text style={styles.sectionTitle}>Emergency Reports ({reports.length})</Text>
             <Text style={styles.sectionSubtitle}>Filter and sort reports by status to manage emergency response efficiently.</Text>
             
             {/* Report Status Filter */}
-            <View style={[styles.filterRow, reportSortDropdown && { zIndex: 4000, elevation: 50 }]}>
-              <Text style={styles.sortLabel}>Filter by:</Text>
-              <View style={{ position: 'relative', zIndex: reportSortDropdown ? 10000 : 1, elevation: reportSortDropdown ? 100 : 0 }}>
+            <View style={[styles.filterRow, { zIndex: reportSortDropdown ? 2000 : 1 }]}>
+              <View style={{ position: 'relative', flex: 1 }}>
                 <TouchableOpacity
-                  style={[styles.sortDropdownBtn, reportSortDropdown && styles.sortDropdownBtnActive]}
+                  style={[styles.sortDropdownBtn, styles.sortDropdownBtnCentered, reportSortDropdown && styles.sortDropdownBtnActive]}
                   onPress={() => setReportSortDropdown(!reportSortDropdown)}
                   activeOpacity={0.85}
                 >
-                  <Text style={styles.sortDropdownBtnText}>
+                  <Text style={[styles.sortDropdownBtnText, styles.filterPrefix]}>Filter:</Text>
+                  <Text style={[styles.sortDropdownBtnText, styles.sortDropdownBtnTextCentered]}>
                     {(() => {
                       switch (reportSort) {
-                        case 'all': return '📋 All Reports';
-                        case 'pending': return '⏳ Pending';
-                        case 'in-progress': return '🚀 In Progress';
-                        case 'resolved': return '✅ Resolved';
-                        default: return '📋 All Reports';
+                        case 'all':
+                          return 'All Reports';
+                        case 'pending':
+                          return 'Pending';
+                        case 'in-progress':
+                          return 'In Progress';
+                        case 'resolved':
+                          return 'Resolved';
+                        default:
+                          return 'All Reports';
                       }
                     })()}
                   </Text>
-                  <Text style={styles.dropdownArrow}>▼</Text>
+                  <Text style={[styles.dropdownArrow, styles.dropdownArrowOverlay]}>▼</Text>
                 </TouchableOpacity>
 
                 {reportSortDropdown && (
@@ -1295,12 +1211,12 @@ return (
                       activeOpacity={1} 
                       onPress={() => setReportSortDropdown(false)}
                     />
-                    <View style={[styles.dropdown, { top: 44, right: 0, width: 180 }]}>
+                    <View style={[styles.dropdown, styles.dropdownFullWidth]}>
                       {[
-                        { key: 'all', label: '📋 All Reports' },
-                        { key: 'pending', label: '⏳ Pending' },
-                        { key: 'in-progress', label: '🚀 In Progress' },
-                        { key: 'resolved', label: '✅ Resolved' },
+                        { key: 'all', label: 'All Reports' },
+                        { key: 'pending', label: 'Pending' },
+                        { key: 'in-progress', label: 'In Progress' },
+                        { key: 'resolved', label: 'Resolved' },
                       ].map((option) => (
                         <TouchableOpacity
                           key={option.key}
@@ -1326,7 +1242,6 @@ return (
             </View>
             {reports.length === 0 ? (
               <View style={styles.emptyState}>
-                <Text style={styles.emptyIcon}>📭</Text>
                 <Text style={styles.emptyText}>No reports submitted yet</Text>
               </View>
             ) : (
@@ -1353,9 +1268,6 @@ return (
                     showsVerticalScrollIndicator={false}
                     ListEmptyComponent={
                       <View style={styles.emptyState}>
-                        <Text style={styles.emptyIcon}>
-                          {reportSort === 'pending' ? '⏳' : reportSort === 'in-progress' ? '🚀' : reportSort === 'resolved' ? '✅' : '📭'}
-                        </Text>
                         <Text style={styles.emptyText}>
                           {reportSort === 'pending' ? 'No pending reports' : 
                            reportSort === 'in-progress' ? 'No reports in progress' : 
@@ -1374,28 +1286,27 @@ return (
         {/* System Analytics (Tab) */}
         {activeTab === 'analytics' && (
           <Animated.View style={[styles.listContainer, { opacity: fadeAnim, transform: [{ translateY: slideAnim }] }]}>
-            <Text style={styles.sectionTitle}>📊 System Analytics</Text>
+            <Text style={styles.sectionTitle}>System Analytics</Text>
             <Text style={styles.sectionSubtitle}>Comprehensive system performance and usage insights</Text>
 
             {/* System Overview */}
             <View style={[styles.statsContainer, { marginBottom: 20 }]}>
-              <Text style={[styles.sectionTitle, { fontSize: 18, marginBottom: 12 }]}>📊 System Overview</Text>
               <View style={styles.statsGrid}>
                 <View style={[styles.statCard, { backgroundColor: '#667eea20' }]}>
                   <Text style={styles.statNumber}>{stats.totalUsers}</Text>
-                  <Text style={styles.statLabel}>👥 Users</Text>
+                  <Text style={styles.statLabel}>Users</Text>
                 </View>
                 <View style={[styles.statCard, { backgroundColor: '#00ff8820' }]}>
                   <Text style={styles.statNumber}>{stats.totalResponders}</Text>
-                  <Text style={styles.statLabel}>🚑 Responders</Text>
+                  <Text style={styles.statLabel}>Responders</Text>
                 </View>
                 <View style={[styles.statCard, { backgroundColor: '#ff980020' }]}>
                   <Text style={styles.statNumber}>{stats.pendingReports}</Text>
-                  <Text style={styles.statLabel}>⏳ Pending</Text>
+                  <Text style={styles.statLabel}>Pending</Text>
                 </View>
                 <View style={[styles.statCard, { backgroundColor: '#4caf5020' }]}>
                   <Text style={styles.statNumber}>{stats.resolvedReports}</Text>
-                  <Text style={styles.statLabel}>✅ Resolved</Text>
+                  <Text style={styles.statLabel}>Resolved</Text>
                 </View>
               </View>
             </View>
@@ -1404,7 +1315,7 @@ return (
             <View style={styles.analyticsGrid}>
               {/* Report Status Distribution */}
               <View style={styles.analyticsCard}>
-                <Text style={styles.analyticsCardTitle}>📋 Report Status Distribution</Text>
+                <Text style={styles.analyticsCardTitle}>Report Status Distribution</Text>
                 <View style={styles.chartContainer}>
                   {(() => {
                     const total = reports.length;
@@ -1443,7 +1354,7 @@ return (
 
               {/* Report Types Distribution */}
               <View style={styles.analyticsCard}>
-                <Text style={styles.analyticsCardTitle}>🏷️ Report Types</Text>
+                <Text style={styles.analyticsCardTitle}>Report Types</Text>
                 <View style={styles.pieChart}>
                   {(() => {
                     const typeCounts: { [key: string]: number } = {};
@@ -1471,7 +1382,7 @@ return (
 
               {/* Responder Performance */}
               <View style={styles.analyticsCard}>
-                <Text style={styles.analyticsCardTitle}>🚑 Responder Performance</Text>
+                <Text style={styles.analyticsCardTitle}>Responder Performance</Text>
                 <View style={styles.performanceList}>
                   {(() => {
                     const responderStats: { [key: string]: { total: number; resolved: number; pending: number } } = {};
@@ -1514,7 +1425,7 @@ return (
 
               {/* Time-based Analytics */}
               <View style={styles.analyticsCard}>
-                <Text style={styles.analyticsCardTitle}>📈 Reports Over Time</Text>
+                <Text style={styles.analyticsCardTitle}>Reports Over Time</Text>
                 <View style={styles.timeChart}>
                   {(() => {
                     const last7Days = Array.from({ length: 7 }, (_, i) => {
@@ -1559,24 +1470,21 @@ return (
 
               {/* System Health Metrics */}
               <View style={styles.analyticsCard}>
-                <Text style={styles.analyticsCardTitle}>⚡ System Health</Text>
+                <Text style={styles.analyticsCardTitle}>System Health</Text>
                 <View style={styles.healthMetrics}>
                   <View style={styles.metricItem}>
-                    <Text style={styles.metricIcon}>📱</Text>
                     <View style={styles.metricInfo}>
                       <Text style={styles.metricValue}>{users.length}</Text>
                       <Text style={styles.metricLabel}>Total Users</Text>
                     </View>
                   </View>
                   <View style={styles.metricItem}>
-                    <Text style={styles.metricIcon}>🚨</Text>
                     <View style={styles.metricInfo}>
                       <Text style={styles.metricValue}>{reports.length}</Text>
                       <Text style={styles.metricLabel}>Total Reports</Text>
                     </View>
                   </View>
                   <View style={styles.metricItem}>
-                    <Text style={styles.metricIcon}>⏱️</Text>
                     <View style={styles.metricInfo}>
                       <Text style={styles.metricValue}>
                         {reports.length > 0 ? Math.round(reports.filter(r => r.status?.toLowerCase() === 'pending').length / reports.length * 100) : 0}%
@@ -1585,7 +1493,6 @@ return (
                     </View>
                   </View>
                   <View style={styles.metricItem}>
-                    <Text style={styles.metricIcon}>✅</Text>
                     <View style={styles.metricInfo}>
                       <Text style={styles.metricValue}>
                         {reports.length > 0 ? Math.round(reports.filter(r => r.status?.toLowerCase() === 'resolved').length / reports.length * 100) : 0}%
@@ -1598,7 +1505,7 @@ return (
 
               {/* Recent Activity */}
               <View style={styles.analyticsCard}>
-                <Text style={styles.analyticsCardTitle}>📝 Recent Activity</Text>
+                <Text style={styles.analyticsCardTitle}>Recent Activity</Text>
                 <ScrollView style={styles.activityList} showsVerticalScrollIndicator={false}>
                   {reports
                     .sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime())
@@ -1636,9 +1543,10 @@ return (
           onPress={() => setActiveTab('users')}
           activeOpacity={0.7}
         >
-          <Text style={[styles.footerIcon, activeTab === 'users' && styles.activeFooterIcon]}>
-            {activeTab === 'users' ? '👥' : '👤'}
-          </Text>
+          <Image
+            source={TAB_ICONS.users}
+            style={[styles.footerIconImage, activeTab === 'users' && styles.activeFooterIconImage]}
+          />
           <Text style={[styles.footerText, activeTab === 'users' && styles.activeFooterText]}>Users</Text>
         </TouchableOpacity>
         
@@ -1647,9 +1555,10 @@ return (
           onPress={() => setActiveTab('reports')}
           activeOpacity={0.7}
         >
-          <Text style={[styles.footerIcon, activeTab === 'reports' && styles.activeFooterIcon]}>
-            {activeTab === 'reports' ? '📋' : '📄'}
-          </Text>
+          <Image
+            source={TAB_ICONS.reports}
+            style={[styles.footerIconImage, activeTab === 'reports' && styles.activeFooterIconImage]}
+          />
           <Text style={[styles.footerText, activeTab === 'reports' && styles.activeFooterText]}>Reports</Text>
         </TouchableOpacity>
         
@@ -1658,9 +1567,10 @@ return (
           onPress={() => setActiveTab('analytics')}
           activeOpacity={0.7}
         >
-          <Text style={[styles.footerIcon, activeTab === 'analytics' && styles.activeFooterIcon]}>
-            {activeTab === 'analytics' ? '📊' : '📈'}
-          </Text>
+          <Image
+            source={TAB_ICONS.analytics}
+            style={[styles.footerIconImage, activeTab === 'analytics' && styles.activeFooterIconImage]}
+          />
           <Text style={[styles.footerText, activeTab === 'analytics' && styles.activeFooterText]}>Analytics</Text>
         </TouchableOpacity>
       </View>
@@ -1841,13 +1751,15 @@ const styles = StyleSheet.create({
   activeFooterButton: {
     backgroundColor: 'rgba(102, 126, 234, 0.2)',
   },
-  footerIcon: {
-    fontSize: 22,
+  footerIconImage: {
+    width: 24,
+    height: 24,
     marginBottom: 4,
-    color: '#888',
+    tintColor: '#888',
+    resizeMode: 'contain',
   },
-  activeFooterIcon: {
-    color: '#667eea',
+  activeFooterIconImage: {
+    tintColor: '#667eea',
   },
   footerText: {
     fontSize: 12,
@@ -1875,6 +1787,11 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: 6 },
     shadowOpacity: 0.3,
     shadowRadius: 10,
+  },
+  dropdownFullWidth: {
+    left: 0,
+    right: 0,
+    width: '100%',
   },
   dropdownBackdrop: {
     position: 'absolute',
@@ -1970,7 +1887,7 @@ const styles = StyleSheet.create({
   statsGrid: {
     flexDirection: 'row',
     flexWrap: 'wrap',
-    gap: 12,
+    gap: 1,
   },
   statCard: {
     flex: 1,
@@ -2132,6 +2049,69 @@ const styles = StyleSheet.create({
     shadowRadius: 8,
     elevation: 4,
   },
+  userCard: {
+    backgroundColor: '#111624',
+    padding: 18,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: '#1f2940',
+    marginBottom: 16,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.2,
+    shadowRadius: 12,
+    elevation: 8,
+  },
+  userCardHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 12,
+  },
+  rolePill: {
+    paddingVertical: 4,
+    paddingHorizontal: 10,
+    borderRadius: 999,
+    color: '#fff',
+    fontWeight: '700',
+    fontSize: 12,
+    backgroundColor: '#2b2d42',
+    overflow: 'hidden',
+  },
+  rolePillAdmin: {
+    backgroundColor: '#d90429',
+  },
+  rolePillResponder: {
+    backgroundColor: '#ef476f',
+  },
+  rolePillUser: {
+    backgroundColor: '#118ab2',
+  },
+  userCardTitle: {
+    fontSize: 20,
+    fontWeight: '800',
+    color: '#fff',
+    marginBottom: 12,
+  },
+  userCardRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 6,
+    gap: 8,
+  },
+  userCardIcon: {
+    fontSize: 14,
+    color: '#9fa7b8',
+  },
+  userCardMeta: {
+    color: '#d8d9dc',
+    fontSize: 14,
+    flex: 1,
+  },
+  userCardFooter: {
+    marginTop: 16,
+    alignItems: 'flex-end',
+  },
   cardHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -2167,36 +2147,17 @@ const styles = StyleSheet.create({
     fontSize: 14,
     marginBottom: 4,
   },
-  deleteBtn: {
-    backgroundColor: '#d90429',
-    paddingVertical: 8,
-    paddingHorizontal: 12,
-    borderRadius: 8,
-    marginTop: 12,
-    alignSelf: 'flex-start',
-  },
-  deleteBtnText: {
-    color: '#fff',
-    fontSize: 12,
-    fontWeight: '600',
-  },
-  actionRow: {
-    flexDirection: 'row',
-    gap: 10,
-    marginTop: 12,
-  },
   viewBtn: {
     backgroundColor: '#2b2d42',
     paddingVertical: 8,
-    paddingHorizontal: 12,
+    paddingHorizontal: 16,
     borderRadius: 8,
-    borderWidth: 1,
-    borderColor: '#3a3d5c',
+    alignSelf: 'flex-end',
   },
   viewBtnText: {
     color: '#fff',
-    fontSize: 12,
-    fontWeight: '600',
+    fontSize: 13,
+    fontWeight: '700',
   },
   reportCard: {
     borderLeftWidth: 4,
@@ -2248,6 +2209,7 @@ const styles = StyleSheet.create({
   reportMeta: {
     color: '#999',
     fontSize: 12,
+    fontWeight: '700',
   },
   emptyState: {
     alignItems: 'center',
@@ -2257,10 +2219,6 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: '#333',
     borderStyle: 'dashed',
-  },
-  emptyIcon: {
-    fontSize: 48,
-    marginBottom: 12,
   },
   emptyText: {
     color: '#999',
@@ -2280,7 +2238,21 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     borderWidth: 1,
     borderColor: '#333',
-    padding: 16,
+    paddingHorizontal: 16,
+    paddingBottom: 16,
+    paddingTop: 32,
+  },
+  modalCloseIconBtn: {
+    position: 'absolute',
+    top: 15,
+    right: 12,
+    zIndex: 2,
+    padding: 6,
+  },
+  modalCloseIconText: {
+    color: '#fff',
+    fontSize: 18,
+    fontWeight: '800',
   },
   modalTitle: {
     color: '#fff',
@@ -2292,6 +2264,7 @@ const styles = StyleSheet.create({
     color: '#bbb',
     fontSize: 14,
     marginBottom: 6,
+    fontWeight: '700',
   },
   modalCloseBtn: {
     backgroundColor: '#667eea',
@@ -2303,6 +2276,56 @@ const styles = StyleSheet.create({
   modalCloseText: {
     color: '#fff',
     fontWeight: '800',
+  },
+  restrictRow: {
+    marginTop: 12,
+    padding: 12,
+    backgroundColor: '#151b2f',
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: '#222a42',
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 12,
+  },
+  restrictTitle: {
+    color: '#fff',
+    fontSize: 14,
+    fontWeight: '700',
+  },
+  restrictSubtitle: {
+    color: '#9aa1b5',
+    fontSize: 12,
+    marginTop: 2,
+    width: 200,
+  },
+  restrictToggle: {
+    width: 52,
+    height: 30,
+    borderRadius: 16,
+    backgroundColor: '#2b2d42',
+    padding: 4,
+    justifyContent: 'center',
+  },
+  restrictToggleActive: {
+    backgroundColor: '#d90429',
+  },
+  restrictThumb: {
+    width: 22,
+    height: 22,
+    borderRadius: 11,
+    backgroundColor: '#fff',
+    transform: [{ translateX: 0 }],
+  },
+  restrictThumbActive: {
+    transform: [{ translateX: 20 }],
+  },
+  restrictNotice: {
+    color: '#ef476f',
+    fontSize: 12,
+    fontWeight: '700',
+    marginTop: 8,
   },
   modalActionRow: {
     flexDirection: 'row',
@@ -2522,12 +2545,6 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: '#333',
   },
-  metricIcon: {
-    fontSize: 24,
-    marginRight: 12,
-    width: 30,
-    textAlign: 'center',
-  },
   metricInfo: {
     flex: 1,
   },
@@ -2589,6 +2606,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-between',
     minWidth: 180,
+    position: 'relative',
   },
   sortDropdownBtnActive: {
     borderColor: '#667eea',
@@ -2600,11 +2618,33 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     flex: 1,
   },
+  sortDropdownBtnTextCentered: {
+    textAlign: 'left',
+    width: '100%',
+  },
+  filterPrefix: {
+    color: '#bbb',
+    fontSize: 14,
+    fontWeight: '600',
+    width: 70,
+    textAlign: 'left',
+  },
+  sortDropdownBtnCentered: {
+    width: '100%',
+    justifyContent: 'center',
+    paddingRight: 32,
+  },
   dropdownArrow: {
     color: '#999',
     fontSize: 12,
     fontWeight: '700',
     marginLeft: 8,
+  },
+  dropdownArrowOverlay: {
+    position: 'absolute',
+    right: 16,
+    top: '50%',
+    transform: [{ translateY: -6 }],
   },
   dropdownItem: {
     paddingVertical: 12,

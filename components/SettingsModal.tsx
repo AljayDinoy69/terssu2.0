@@ -12,9 +12,11 @@ export type SettingsModalProps = {
   onToggleSound: (next: boolean) => void;
 };
 
+const LOCKED_THEME: AppTheme = 'dark';
+
 export default function SettingsModal({ visible, onClose, soundEnabled, onToggleSound }: SettingsModalProps) {
   const { setMode, colors } = useTheme();
-  const [theme, setTheme] = useState<AppTheme>('system');
+  const [theme, setTheme] = useState<AppTheme>(LOCKED_THEME);
   const [notifFreq, setNotifFreq] = useState<NotificationFrequency>('normal');
   const [ringtoneKey, setRingtoneKey] = useState<string>('ring1');
   const ringtones = getRingtones();
@@ -24,8 +26,9 @@ export default function SettingsModal({ visible, onClose, soundEnabled, onToggle
     if (!visible) return;
     (async () => {
       try {
-        const t = await getAppTheme();
-        setTheme(t);
+        await setAppTheme(LOCKED_THEME);
+        await setMode(LOCKED_THEME);
+        setTheme(LOCKED_THEME);
       } catch {}
       try {
         const f = await getNotificationFrequency();
@@ -38,15 +41,31 @@ export default function SettingsModal({ visible, onClose, soundEnabled, onToggle
     })();
   }, [visible]);
 
-  const ThemeButton = ({ value, label }: { value: AppTheme; label: string }) => (
-    <TouchableOpacity
-      style={[styles.choiceBtn, theme === value && styles.choiceBtnActive]}
-      onPress={async () => { setTheme(value); await setAppTheme(value); await setMode(value); }}
-      activeOpacity={0.8}
-    >
-      <Text style={[styles.choiceBtnText, theme === value && styles.choiceBtnTextActive]}>{label}</Text>
-    </TouchableOpacity>
-  );
+  const ThemeButton = ({ value, label }: { value: AppTheme; label: string }) => {
+    const isLockedOption = value === LOCKED_THEME;
+    return (
+      <TouchableOpacity
+        style={[styles.choiceBtn, !isLockedOption && styles.choiceBtnDisabled, theme === value && styles.choiceBtnActive]}
+        onPress={async () => {
+          await setAppTheme(LOCKED_THEME);
+          await setMode(LOCKED_THEME);
+          setTheme(LOCKED_THEME);
+        }}
+        activeOpacity={isLockedOption ? 0.8 : 1}
+        disabled={!isLockedOption}
+      >
+        <Text
+          style={[
+            styles.choiceBtnText,
+            !isLockedOption && styles.choiceBtnTextDisabled,
+            theme === value && styles.choiceBtnTextActive,
+          ]}
+        >
+          {label}
+        </Text>
+      </TouchableOpacity>
+    );
+  };
 
   const FreqButton = ({ value, label }: { value: NotificationFrequency; label: string }) => (
     <TouchableOpacity
@@ -124,7 +143,7 @@ export default function SettingsModal({ visible, onClose, soundEnabled, onToggle
           {/* Theme */}
           <View style={styles.rowColumn}>
             <Text style={[styles.rowTitle, { color: colors.text }]}>Theme</Text>
-            <Text style={[styles.rowSub, { color: colors.text + '99' }]}>Choose how the app looks</Text>
+            <Text style={[styles.rowSub, { color: colors.text + '99' }]}>Theme is temporarily locked to Dark mode</Text>
             <View style={styles.choicesRow}>
               <ThemeButton value="system" label="System" />
               <ThemeButton value="light" label="Light" />
@@ -226,6 +245,9 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: '#333',
   },
+  choiceBtnDisabled: {
+    opacity: 0.5,
+  },
   choiceBtnActive: {
     backgroundColor: '#667eea30',
     borderColor: '#667eea',
@@ -234,6 +256,9 @@ const styles = StyleSheet.create({
     color: '#fff',
     fontWeight: '800',
     fontSize: 12,
+  },
+  choiceBtnTextDisabled: {
+    color: '#777',
   },
   choiceBtnTextActive: {
     color: '#c3d3ff',
