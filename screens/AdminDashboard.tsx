@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useRef } from 'react';
+import React, { useEffect, useState, useRef, useMemo, useCallback } from 'react';
 import { View, Text, StyleSheet, FlatList, TouchableOpacity, TextInput, Alert, Animated, Dimensions, ScrollView, Image, Modal, InteractionManager } from 'react-native';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { RootStackParamList } from '../navigation/AppNavigator';
@@ -9,6 +9,12 @@ import { isSoundEnabled, setSoundEnabled, getNotificationFrequency, Notification
 import { useTheme } from '../components/ThemeProvider';
 
 export type AdminDashProps = NativeStackScreenProps<RootStackParamList, 'AdminDashboard'>;
+
+type DisplayNotification = NotificationItem & {
+  __groupKey?: string;
+  __canonicalReportId?: string;
+  __groupedReport?: any;
+};
 
 // Server-backed notifications
 
@@ -24,6 +30,9 @@ export default function AdminDashboard({ navigation }: AdminDashProps) {
   const { colors } = useTheme();
   const [users, setUsers] = useState<any[]>([]);
   const [reports, setReports] = useState<any[]>([]);
+  const [groupedReports, setGroupedReports] = useState<any[]>([]);
+  const [reportGroupIndex, setReportGroupIndex] = useState<Record<string, string>>({});
+  const [reportGroupLookup, setReportGroupLookup] = useState<Record<string, any>>({});
   const [nameMapState, setNameMapState] = useState<Record<string, string>>({});
   const [form, setForm] = useState({ name: '', email: '', phone: '', password: 'responder123' });
   const [activeTab, setActiveTab] = useState<'users' | 'reports' | 'analytics'>('users');
@@ -288,6 +297,92 @@ export default function AdminDashboard({ navigation }: AdminDashProps) {
     };
   }, []);
 
+  const canonicalReportId = (id?: string | null) => (id ? String(id) : undefined);
+
+  const notificationGroupKey = useCallback((notif: NotificationItem, groupIndex: Record<string, string>) => {
+    const canonical = canonicalReportId(notif.reportId);
+    if (canonical) {
+      const mapped = groupIndex[canonical];
+      if (mapped) return mapped;
+      const ts = new Date(notif.createdAt || 0).getTime();
+      return `${notif.title || ''}|${notif.kind || ''}|${ts ? Math.floor(ts / 1000) : '0'}`;
+    }
+    if (notif.title || notif.createdAt) {
+      const ts = new Date(notif.createdAt || 0).getTime();
+      return `${notif.title || ''}|${notif.kind || ''}|${ts ? Math.floor(ts / 1000) : '0'}`;
+    }
+    return notif.id;
+  }, []);
+
+  const dedupeNotifications = useCallback((items: NotificationItem[], groupIndex: Record<string, string>, groupLookup: Record<string, any>): DisplayNotification[] => {
+    if (!items || items.length === 0) return [];
+
+    const result: Record<string, DisplayNotification> = {};
+
+    for (const notif of items) {
+      const key = notificationGroupKey(notif, groupIndex);
+      const groupData = groupLookup[key];
+      const canonical = canonicalReportId(notif.reportId);
+
+      if (!result[key]) {
+        result[key] = {
+          ...notif,
+          __groupKey: key,
+          __canonicalReportId: canonical,
+          __groupedReport: groupData,
+        };
+      } else {
+        result[key].read = result[key].read && notif.read;
+        const existingCreated = new Date(result[key].createdAt || 0).getTime();
+        const incomingCreated = new Date(notif.createdAt || 0).getTime();
+        if (incomingCreated > existingCreated) {
+          result[key].createdAt = notif.createdAt;
+          result[key].title = notif.title;
+          result[key].kind = notif.kind;
+        }
+      }
+    }
+
+    return Object.values(result).sort((a, b) => Number(new Date(b.createdAt || 0)) - Number(new Date(a.createdAt || 0)));
+  }, [notificationGroupKey]);
+
+  const [displayNotifs, setDisplayNotifs] = useState<DisplayNotification[]>([]);
+
+  const updateUnseenCount = useCallback((items: DisplayNotification[]) => {
+    const unread = items.filter(n => !n.read).length;
+    unseenRef.current = unread;
+    setUnseen(unread);
+  }, []);
+
+  const recomputeNotifications = useCallback((rawNotifs: NotificationItem[], groupIndexOverride?: Record<string, string>, groupLookupOverride?: Record<string, any>) => {
+    const index = groupIndexOverride ?? reportGroupIndex;
+    const lookup = groupLookupOverride ?? reportGroupLookup;
+    const groups = dedupeNotifications(rawNotifs, index, lookup);
+    setDisplayNotifs(groups);
+    updateUnseenCount(groups);
+  }, [dedupeNotifications, reportGroupIndex, reportGroupLookup, updateUnseenCount]);
+
+  const buildReportGrouping = useCallback((grouped: any[]) => {
+    const index: Record<string, string> = {};
+    const lookup: Record<string, any> = {};
+    for (const g of grouped) {
+      const key = g.memberReportIds && g.memberReportIds.length > 0
+        ? g.memberReportIds.slice().sort().join('|')
+        : (g.id ? String(g.id) : undefined);
+      if (!key) continue;
+      lookup[key] = g;
+      if (Array.isArray(g.memberReportIds)) {
+        for (const id of g.memberReportIds) {
+          index[String(id)] = key;
+        }
+      }
+      if (g.id) {
+        index[String(g.id)] = key;
+      }
+    }
+    return { index, lookup };
+  }, []);
+
   const load = async () => {
     // Refresh animation
     Animated.sequence([
@@ -333,7 +428,14 @@ export default function AdminDashboard({ navigation }: AdminDashProps) {
     } catch {}
     setNameMapState(map);
     const all = await listAllReports();
-    setReports([...all].sort((a, b) => Number(b?.createdAt ?? 0) - Number(a?.createdAt ?? 0)));
+    const sortedAll = [...all].sort((a, b) => Number(b?.createdAt ?? 0) - Number(a?.createdAt ?? 0));
+    const grouped = groupReports(sortedAll);
+    const { index, lookup } = buildReportGrouping(grouped);
+    setReports(sortedAll);
+    setGroupedReports(grouped);
+    setReportGroupIndex(index);
+    setReportGroupLookup(lookup);
+    recomputeNotifications(notifs, index, lookup);
   };
 
   const loadNotifications = async () => {
@@ -343,8 +445,7 @@ export default function AdminDashboard({ navigation }: AdminDashProps) {
       const items = await listNotifications(me.id);
       const sorted = [...items].sort((a, b) => Number(new Date(b.createdAt || 0)) - Number(new Date(a.createdAt || 0)));
       setNotifs(sorted);
-      const unread = sorted.filter(n => !n.read).length;
-      unseenRef.current = unread; setUnseen(unread);
+      recomputeNotifications(sorted);
     } catch {}
   };
 
@@ -352,6 +453,12 @@ export default function AdminDashboard({ navigation }: AdminDashProps) {
     const unsub = navigation.addListener('focus', async () => { await load(); await loadNotifications(); });
     return unsub;
   }, [navigation]);
+
+  useEffect(() => {
+    if (notifs.length > 0 || displayNotifs.length > 0) {
+      recomputeNotifications(notifs);
+    }
+  }, [groupedReports]);
 
   const onCreateResponder = async () => {
     // Button press animation
@@ -497,13 +604,24 @@ export default function AdminDashboard({ navigation }: AdminDashProps) {
         // Try to find an existing group within time window
         let target = merged.find(g => g.__groupKey === key && Math.abs(new Date(g.createdAt || 0).getTime() - t) <= WINDOW);
         if (!target) {
-          target = { ...r, responders: r.responderId ? [r.responderId] : [], __groupKey: key };
+          const memberIds = r?.id ? [String(r.id)] : [];
+          target = {
+            ...r,
+            responders: r.responderId ? [r.responderId] : [],
+            memberReportIds: memberIds,
+            __groupKey: key,
+          };
           merged.push(target);
         } else {
           if (r.responderId) {
             const arrResp: string[] = target.responders || [];
             if (!arrResp.includes(r.responderId)) arrResp.push(r.responderId);
             target.responders = arrResp;
+          }
+          if (r?.id) {
+            const members: string[] = target.memberReportIds || [];
+            if (!members.includes(String(r.id))) members.push(String(r.id));
+            target.memberReportIds = members;
           }
           // Keep earliest createdAt
           const tPrev = new Date(target.createdAt || 0).getTime();
@@ -517,7 +635,10 @@ export default function AdminDashboard({ navigation }: AdminDashProps) {
     }
 
     // Remove helper key
-    return merged.map(g => { const { __groupKey, ...rest } = g; return rest; });
+    return merged.map(g => {
+      const { __groupKey, ...rest } = g;
+      return rest;
+    });
   };
 
   const isPending = (status?: string) => status?.toLowerCase() === 'pending';
@@ -691,7 +812,7 @@ return (
                       <Text style={{ color: colors.text + '99', fontSize: 18 }}>✖</Text>
                     </TouchableOpacity>
                   </View>
-                  {notifs.length === 0 ? (
+                  {displayNotifs.length === 0 ? (
                     <Text style={[styles.emptyText, { color: colors.text + '99' }]}>No notifications yet</Text>
                   ) : (
                     <>
@@ -712,25 +833,53 @@ return (
                         </TouchableOpacity>
                       )}
                       <ScrollView style={{ maxHeight: 360 }} contentContainerStyle={{ paddingBottom: 8 }} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
-                        {notifs.map(n => (
+                        {displayNotifs.map((n) => (
                           <TouchableOpacity
-                            key={n.id}
+                            key={n.__groupKey || n.id}
                             style={[styles.notifItem, { opacity: n.read ? 0.7 : 1 }]}
                             onPress={async () => {
                               if (n.reportId) {
-                                const rep = reports.find(r => String(r.id) === String(n.reportId));
+                                const targetId = n.__canonicalReportId || n.reportId;
+                                const rep = groupedReports.find(r => {
+                                  if (r?.memberReportIds && Array.isArray(r.memberReportIds)) {
+                                    return r.memberReportIds.includes(String(targetId));
+                                  }
+                                  return String(r.id) === String(targetId);
+                                });
                                 if (rep) openReportDetails(rep);
                                 else {
                                   const all = await listAllReports();
-                                  const found = all.find(r => String(r.id) === String(n.reportId)) || null;
+                                  const sortedAll = [...all].sort((a, b) => Number(b?.createdAt ?? 0) - Number(a?.createdAt ?? 0));
+                                  const grouped = groupReports(sortedAll);
+                                  const { index: idx, lookup: lk } = buildReportGrouping(grouped);
+                                  setReports(sortedAll);
+                                  setGroupedReports(grouped);
+                                  setReportGroupIndex(idx);
+                                  setReportGroupLookup(lk);
+                                  recomputeNotifications(notifs, idx, lk);
+                                  const found = grouped.find(r => {
+                                    if (r?.memberReportIds && Array.isArray(r.memberReportIds)) {
+                                      return r.memberReportIds.includes(String(targetId));
+                                    }
+                                    return String(r.id) === String(targetId);
+                                  }) || null;
                                   if (found) openReportDetails(found);
                                 }
                               }
                               try {
                                 if (!n.read) {
                                   await markNotificationRead(n.id, true);
-                                  setNotifs(prev => prev.map(x => x.id === n.id ? { ...x, read: true } : x));
-                                  if (unseenRef.current > 0) { unseenRef.current -= 1; setUnseen(unseenRef.current); }
+                                  setNotifs(prev => {
+                                    const next = prev.map(x => {
+                                      const sameGroup = n.__groupKey && notificationGroupKey(x, reportGroupIndex) === n.__groupKey;
+                                      if (sameGroup || x.id === n.id) {
+                                        return { ...x, read: true };
+                                      }
+                                      return x;
+                                    });
+                                    recomputeNotifications(next);
+                                    return next;
+                                  });
                                 }
                               } catch {}
                               setNotifOpen(false);
@@ -745,10 +894,19 @@ return (
                             <TouchableOpacity
                               onPress={async () => {
                                 try {
-                                  const next = !n.read; await markNotificationRead(n.id, next);
-                                  setNotifs(prev => prev.map(x => x.id === n.id ? { ...x, read: next } : x));
-                                  unseenRef.current = Math.max(0, unseenRef.current + (next ? -1 : 1));
-                                  setUnseen(unseenRef.current);
+                                  const nextRead = !n.read;
+                                  await markNotificationRead(n.id, nextRead);
+                                  setNotifs(prev => {
+                                    const next = prev.map(x => {
+                                      const sameGroup = n.__groupKey && notificationGroupKey(x, reportGroupIndex) === n.__groupKey;
+                                      if (sameGroup || x.id === n.id) {
+                                        return { ...x, read: nextRead };
+                                      }
+                                      return x;
+                                    });
+                                    recomputeNotifications(next);
+                                    return next;
+                                  });
                                 } catch {}
                               }}
                               style={{ paddingHorizontal: 8, paddingVertical: 4 }}
@@ -760,8 +918,17 @@ return (
                               onPress={async () => {
                                 try {
                                   await deleteNotification(n.id);
-                                  setNotifs(prev => prev.filter(x => x.id !== n.id));
-                                  if (!n.read && unseenRef.current > 0) { unseenRef.current -= 1; setUnseen(unseenRef.current); }
+                                  setNotifs(prev => {
+                                    const next = prev.filter(x => {
+                                      if (n.__groupKey) {
+                                        return notificationGroupKey(x, reportGroupIndex) !== n.__groupKey;
+                                      }
+                                      if (n.reportId) return x.reportId !== n.reportId;
+                                      return x.id !== n.id;
+                                    });
+                                    recomputeNotifications(next);
+                                    return next;
+                                  });
                                 } catch {}
                               }}
                               style={{ paddingHorizontal: 8, paddingVertical: 4 }}

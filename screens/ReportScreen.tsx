@@ -340,7 +340,7 @@ export default function ReportScreen({ navigation, route }: ReportProps) {
         >
           <View style={styles.titleHeader}>
             <Text style={styles.title}>
-              {isAnonymous ? '🚨 Anonymous Report' : '📋 Report Incident'}
+              {isAnonymous ? 'Anonymous Report' : 'Report Incident'}
             </Text>
             {isAnonymous && <View style={styles.anonymousBadge} />}
           </View>
@@ -378,7 +378,7 @@ export default function ReportScreen({ navigation, route }: ReportProps) {
           {/* Full Name (Optional) */}
           <Animated.View style={{ transform: [{ scale: inputAnimations[0] }] }}>
             <View style={styles.inputContainer}>
-              <Text style={styles.inputLabel}>👤 Full Name (optional)</Text>
+              <Text style={styles.inputLabel}>Full Name (optional)</Text>
               <TextInput
                 value={fullName}
                 onChangeText={setFullName}
@@ -401,7 +401,7 @@ export default function ReportScreen({ navigation, route }: ReportProps) {
           {/* Contact No. */}
           <Animated.View style={{ transform: [{ scale: inputAnimations[2] }] }}>
             <View style={styles.inputContainer}>
-              <Text style={styles.inputLabel}>📞 Contact No.</Text>
+              <Text style={styles.inputLabel}>Contact No.</Text>
               <TextInput
                 value={contactNo}
                 onChangeText={setContactNo}
@@ -421,7 +421,7 @@ export default function ReportScreen({ navigation, route }: ReportProps) {
           {/* Chief Complaint (Dropdown) */}
           <Animated.View style={{ transform: [{ scale: inputAnimations[3] }] }}>
             <View style={styles.inputContainer}>
-              <Text style={styles.inputLabel}>🆘 Chief Complaint</Text>
+              <Text style={styles.inputLabel}>Chief Complaint</Text>
               <TouchableOpacity
                 style={[styles.input, chiefComplaint.length > 0 && styles.inputFilled, styles.inputSelect]}
                 onPress={() => setShowChiefOptions(prev => !prev)}
@@ -455,7 +455,7 @@ export default function ReportScreen({ navigation, route }: ReportProps) {
           {/* Persons Involved (Dropdown for count) */}
           <Animated.View style={{ transform: [{ scale: inputAnimations[4] }] }}>
             <View style={styles.inputContainer}>
-              <Text style={styles.inputLabel}>👥 Persons Involved</Text>
+              <Text style={styles.inputLabel}>Persons Involved</Text>
               <TouchableOpacity
                 style={[styles.input, personsInvolved.length > 0 && styles.inputFilled, styles.inputSelect]}
                 onPress={() => setShowPersonsOptions(prev => !prev)}
@@ -489,7 +489,7 @@ export default function ReportScreen({ navigation, route }: ReportProps) {
           {/* Description (Optional) */}
           <Animated.View style={{ transform: [{ scale: inputAnimations[5] }] }}>
             <View style={styles.inputContainer}>
-              <Text style={styles.inputLabel}>📝 Description (optional)</Text>
+              <Text style={styles.inputLabel}>Description (optional)</Text>
               <TextInput
                 value={description}
                 onChangeText={setDescription}
@@ -518,7 +518,7 @@ export default function ReportScreen({ navigation, route }: ReportProps) {
               },
             ]}
           >
-            <Text style={styles.sectionTitle}>🚑 Select Emergency Responder(s)</Text>
+            <Text style={styles.sectionTitle}>Select Emergency Responder(s)</Text>
             <View style={styles.responderGrid}>
               {responders.map((r, index) => (
                 <TouchableOpacity
@@ -531,7 +531,6 @@ export default function ReportScreen({ navigation, route }: ReportProps) {
                   activeOpacity={0.8}
                 >
                   <View style={styles.responderContent}>
-                    <Text style={styles.responderIcon}>👨‍⚕️</Text>
                     <Text style={[
                       styles.responderName,
                       selectedResponderIds.includes(r.id) && styles.responderNameActive
@@ -552,7 +551,7 @@ export default function ReportScreen({ navigation, route }: ReportProps) {
           {/* Location */}
           <Animated.View style={{ transform: [{ scale: inputAnimations[6] }] }}>
             <View style={styles.inputContainer}>
-              <Text style={styles.inputLabel}>📍 Location</Text>
+              <Text style={styles.inputLabel}>Location</Text>
               <TextInput
                 value={locationText}
                 onChangeText={setLocationText}
@@ -571,14 +570,14 @@ export default function ReportScreen({ navigation, route }: ReportProps) {
           {/* Photo Upload */}
           <Animated.View style={{ transform: [{ scale: inputAnimations[7] }] }}>
             <View style={styles.photoContainer}>
-              <Text style={styles.inputLabel}>📷 Evidence Photos (Required)</Text>
+              <Text style={styles.inputLabel}>Evidence Photos (Required)</Text>
               <TouchableOpacity 
                 style={[styles.photoButton, photos.length >= MAX_PHOTOS && styles.photoButtonDisabled]} 
                 onPress={captureImage}
                 disabled={photos.length >= MAX_PHOTOS}
                 activeOpacity={0.8}
               >
-                <Text style={styles.photoButtonText}>📸 Add Photo</Text>
+                <Text style={styles.photoButtonText}>Add Photo</Text>
                 <Text style={styles.photoButtonSubtext}>
                   {photos.length}/{MAX_PHOTOS} attached {photos.length >= MAX_PHOTOS ? '(max reached)' : '· Tap to capture more'}
                 </Text>
@@ -621,7 +620,7 @@ export default function ReportScreen({ navigation, route }: ReportProps) {
           >
             <View style={styles.buttonContent}>
               <Text style={styles.submitBtnText}>
-                {loading ? '📤 Submitting Report...' : '🚀 Submit Emergency Report'}
+                {loading ? 'Submitting Report...' : 'Submit Emergency Report'}
               </Text>
               {!loading && (chiefComplaint && contactNo && personsInvolved && locationText && selectedResponderIds.length > 0 && photos.length > 0) && (
                 <View style={styles.buttonGlow} />
@@ -634,7 +633,7 @@ export default function ReportScreen({ navigation, route }: ReportProps) {
         {isAnonymous && (
           <Animated.View style={[styles.emergencyNote, { opacity: fadeAnim }]}>
             <Text style={styles.emergencyNoteText}>
-              🔒 Your identity will remain anonymous. Emergency responders will be notified immediately.
+              Your identity will remain anonymous. Emergency responders will be notified immediately.
             </Text>
           </Animated.View>
         )}
@@ -878,10 +877,6 @@ const styles = StyleSheet.create({
   },
   responderContent: {
     alignItems: 'center',
-  },
-  responderIcon: {
-    fontSize: 24,
-    marginBottom: 4,
   },
   responderName: {
     color: '#999',

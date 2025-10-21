@@ -358,10 +358,10 @@ setProfileModalVisible(false);
 
   const getStatusIcon = (status: string) => {
     switch (status?.toLowerCase()) {
-      case 'pending': return '⏳';
-      case 'in-progress': return '🚀';
-      case 'resolved': return '✅';
-      default: return '❓';
+      case 'pending': return '';
+      case 'in-progress': return '';
+      case 'resolved': return '';
+      default: return '';
     }
   };
 
@@ -440,9 +440,9 @@ setProfileModalVisible(false);
       
       <View style={styles.cardDetails}>
         <Text style={styles.cardMeta} numberOfLines={2}>
-          👨‍⚕️ Responders: {(item as any).responders ? (item as any).responders.map((id: string) => nameMap[id] || id).join(', ') : (item as any).responderId}
+          Responders: {(item as any).responders ? (item as any).responders.map((id: string) => nameMap[id] || id).join(', ') : (item as any).responderId}
         </Text>
-        <Text style={styles.cardMeta}>📅 Created: {new Date(item.createdAt).toLocaleString()}</Text>
+        <Text style={styles.cardMeta}>Created: {new Date(item.createdAt).toLocaleString()}</Text>
       </View>
     </Animated.View>
   );
@@ -623,21 +623,21 @@ setProfileModalVisible(false);
               onPress={handleProfilePress}
               activeOpacity={0.7}
             >
-              <Text style={styles.menuItemText}>👤 Profile</Text>
+              <Text style={styles.menuItemText}>Profile</Text>
             </TouchableOpacity>
             <TouchableOpacity 
               style={styles.menuItem} 
               onPress={() => { setMenuOpen(false); setSettingsOpen(true); }}
               activeOpacity={0.7}
             >
-              <Text style={styles.menuItemText}>⚙️ Settings</Text>
+              <Text style={styles.menuItemText}>Settings</Text>
             </TouchableOpacity>
             <TouchableOpacity 
               style={styles.menuItem} 
               onPress={() => { setMenuOpen(false); Alert.alert('About & Services', 'Coming soon'); }}
               activeOpacity={0.7}
             >
-              <Text style={styles.menuItemText}>ℹ️ About & Services</Text>
+              <Text style={styles.menuItemText}>About & Services</Text>
             </TouchableOpacity>
             <View style={styles.menuDivider} />
             <TouchableOpacity 
@@ -645,7 +645,7 @@ setProfileModalVisible(false);
               onPress={() => { setMenuOpen(false); onLogout(); }}
               activeOpacity={0.7}
             >
-              <Text style={[styles.menuItemText, { color: '#fff' }]}>🚪 Logout</Text>
+              <Text style={[styles.menuItemText, { color: '#fff' }]}>Logout</Text>
             </TouchableOpacity>
           </Animated.View>
         </Animated.View>
@@ -670,23 +670,23 @@ setProfileModalVisible(false);
                 },
               ]}
             >
-              <Text style={styles.sectionTitle}>📈 My Reports Overview</Text>
+              <Text style={styles.sectionTitle}>My Reports Overview</Text>
               <View style={styles.statsGrid}>
                 <View style={[styles.statCard, { backgroundColor: '#667eea20' }]}>
                   <Text style={styles.statNumber}>{stats.totalReports}</Text>
-                  <Text style={styles.statLabel}>📋 Total Reports</Text>
+                  <Text style={styles.statLabel}>Total Reports</Text>
                 </View>
                 <View style={[styles.statCard, { backgroundColor: '#ff980020' }]}>
                   <Text style={styles.statNumber}>{stats.pendingReports}</Text>
-                  <Text style={styles.statLabel}>⏳ Pending</Text>
+                  <Text style={styles.statLabel}>Pending</Text>
                 </View>
                 <View style={[styles.statCard, { backgroundColor: '#2196f320' }]}>
                   <Text style={styles.statNumber}>{stats.inProgressReports}</Text>
-                  <Text style={styles.statLabel}>🚀 In Progress</Text>
+                  <Text style={styles.statLabel}>In Progress</Text>
                 </View>
                 <View style={[styles.statCard, { backgroundColor: '#4caf5020' }]}>
                   <Text style={styles.statNumber}>{stats.resolvedReports}</Text>
-                  <Text style={styles.statLabel}>✅ Resolved</Text>
+                  <Text style={styles.statLabel}>Resolved</Text>
                 </View>
               </View>
             </Animated.View>
@@ -702,7 +702,6 @@ setProfileModalVisible(false);
               ]}
             > 
               <View style={styles.searchContainer}>
-                <Text style={styles.searchIcon}>🔍</Text>
                 <TextInput
                   placeholder="Search reports (type, description, status)"
                   placeholderTextColor="#888"
@@ -713,7 +712,7 @@ setProfileModalVisible(false);
               </View>
               <View style={styles.rowBetween}>
                 <Text style={styles.meta}>
-                  📈 Showing {displayed.length} of {reports.length}
+                  Showing {displayed.length} of {reports.length}
                 </Text>
                 <TouchableOpacity
                   style={styles.sortBtn}
@@ -730,7 +729,6 @@ setProfileModalVisible(false);
         )}
         ListEmptyComponent={(
           <View style={[styles.emptyState, { marginHorizontal: 20 }]}>
-            <Text style={styles.emptyIcon}>📄</Text>
             <Text style={styles.emptyText}>No reports yet.</Text>
             <Text style={styles.emptySubtext}>Create your first report to get started!</Text>
           </View>
@@ -758,7 +756,7 @@ setProfileModalVisible(false);
           onPress={() => navigation.navigate('Report')}
           activeOpacity={0.8}
         >
-          <Text style={styles.primaryBtnText}>➕ Create New Report</Text>
+          <Text style={styles.primaryBtnText}>Create New Report</Text>
         </TouchableOpacity>
       </View>
 
@@ -1110,10 +1108,6 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: '#2a2a3e',
   },
-  searchIcon: {
-    fontSize: 16,
-    opacity: 0.7,
-  },
   searchInput: { 
     flex: 1,
     paddingVertical: 8, 
@@ -1244,10 +1238,6 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: '#333',
     borderStyle: 'dashed',
-  },
-  emptyIcon: {
-    fontSize: 48,
-    marginBottom: 12,
   },
   emptyText: {
     fontSize: 16,

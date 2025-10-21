@@ -452,7 +452,6 @@ export default function HomeScreen({ navigation }: HomeProps) {
         {/* Info Cards */}
         <View style={styles.infoCards}>
           <View style={[styles.infoCard, styles.cardShadow]}> 
-            <Text style={styles.infoIcon}>🕒</Text>
             <View style={styles.infoTextWrap}>
               <Text style={styles.infoTitle}>24/7 Availability</Text>
               <Text style={styles.infoDesc}>Report incidents anytime, anywhere with reliable uptime.</Text>
@@ -460,7 +459,6 @@ export default function HomeScreen({ navigation }: HomeProps) {
           </View>
 
           <View style={[styles.infoCard, styles.cardShadow]}>
-            <Text style={styles.infoIcon}>📍</Text>
             <View style={styles.infoTextWrap}>
               <Text style={styles.infoTitle}>Accurate Geolocation</Text>
               <Text style={styles.infoDesc}>Share precise location to speed up emergency response.</Text>
@@ -468,7 +466,6 @@ export default function HomeScreen({ navigation }: HomeProps) {
           </View>
 
           <View style={[styles.infoCard, styles.cardShadow]}>
-            <Text style={styles.infoIcon}>🔒</Text>
             <View style={styles.infoTextWrap}>
               <Text style={styles.infoTitle}>Privacy First</Text>
               <Text style={styles.infoDesc}>Report anonymously or securely with your account.</Text>
@@ -916,16 +913,12 @@ const styles = StyleSheet.create({
     borderRadius: 16,
     padding: 14,
   },
-  infoIcon: {
-    fontSize: 22,
-    marginRight: 12,
-  },
   infoTextWrap: {
     flex: 1,
   },
   infoTitle: {
     color: '#ffffff',
-    fontSize: 14,
+    fontSize: 20,
     fontWeight: '800',
     marginBottom: 2,
     letterSpacing: 0.3,
