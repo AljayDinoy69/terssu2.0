@@ -35,6 +35,8 @@ export default function UserDashboard({ navigation }: UserDashProps) {
   const [imageViewerVisible, setImageViewerVisible] = useState(false);
   const [imageViewerUri, setImageViewerUri] = useState<string | null>(null);
   const [nameMap, setNameMap] = useState<Record<string, string>>({});
+  const [selectedReport, setSelectedReport] = useState<Report | null>(null);
+  const [detailsModalVisible, setDetailsModalVisible] = useState(false);
 
   // Animation values
   const fadeAnim = useRef(new Animated.Value(0)).current;
@@ -267,32 +269,37 @@ export default function UserDashboard({ navigation }: UserDashProps) {
     navigation.reset({ index: 0, routes: [{ name: 'Home' }] });
   };
 
-const handleProfilePress = () => {
-setMenuOpen(false);
-setProfileModalVisible(true);
-};
+  const handleProfilePress = () => {
+    setMenuOpen(false);
+    setProfileModalVisible(true);
+  };
 
-const handleProfileUpdated = (updatedUser: any) => {
-  setCurrentUser((prevUser: any) => ({
-    ...prevUser,
-    ...updatedUser,
-    name: updatedUser.name || prevUser?.name,
-    email: updatedUser.email || prevUser?.email,
-    phone: updatedUser.phone || prevUser?.phone || '',
-    photoUrl: (updatedUser as any)?.photoUrl || (updatedUser as any)?.avatarUrl || prevUser?.photoUrl || prevUser?.avatarUrl,
-    avatarUrl: (updatedUser as any)?.avatarUrl || (updatedUser as any)?.photoUrl || prevUser?.avatarUrl || prevUser?.photoUrl,
-    ...(updatedUser as any)?.address && { address: (updatedUser as any).address },
-    ...(updatedUser as any)?.emergencyContact && { emergencyContact: (updatedUser as any).emergencyContact }
-  }));
+  const handleProfileUpdated = (updatedUser: any) => {
+    setCurrentUser((prevUser: any) => ({
+      ...prevUser,
+      ...updatedUser,
+      name: updatedUser.name || prevUser?.name,
+      email: updatedUser.email || prevUser?.email,
+      phone: updatedUser.phone || prevUser?.phone || '',
+      photoUrl: (updatedUser as any)?.photoUrl || (updatedUser as any)?.avatarUrl || prevUser?.photoUrl || prevUser?.avatarUrl,
+      avatarUrl: (updatedUser as any)?.avatarUrl || (updatedUser as any)?.photoUrl || prevUser?.avatarUrl || prevUser?.photoUrl,
+      ...(updatedUser as any)?.address && { address: (updatedUser as any).address },
+      ...(updatedUser as any)?.emergencyContact && { emergencyContact: (updatedUser as any).emergencyContact }
+    }));
   
-  // Show success toast or update any UI that depends on user data
-  // For example, you might want to show a toast message here
-};
+    // Show success toast or update any UI that depends on user data
+    // For example, you might want to show a toast message here
+  };
 
-const handleAccountDeleted = () => {
-setProfileModalVisible(false);
-// Navigation will be handled by the modal
-};
+  const handleAccountDeleted = () => {
+    setProfileModalVisible(false);
+    // Navigation will be handled by the modal
+  };
+
+  const handleViewDetails = (report: Report) => {
+    setSelectedReport(report);
+    setDetailsModalVisible(true);
+  };
 
   // Group multiple responder assignments into a single incident card
   const groupReportsByIncident = (items: Report[]) => {
@@ -339,10 +346,11 @@ setProfileModalVisible(false);
   );
 
   const getStatsData = () => {
-    const totalReports = reports.length;
-    const pendingReports = reports.filter(r => r.status?.toLowerCase() === 'pending').length;
-    const inProgressReports = reports.filter(r => r.status?.toLowerCase() === 'in-progress').length;
-    const resolvedReports = reports.filter(r => r.status?.toLowerCase() === 'resolved').length;
+    const groupedReports = groupReportsByIncident(reports);
+    const totalReports = groupedReports.length;
+    const pendingReports = groupedReports.filter(r => r.status?.toLowerCase() === 'pending').length;
+    const inProgressReports = groupedReports.filter(r => r.status?.toLowerCase() === 'in-progress').length;
+    const resolvedReports = groupedReports.filter(r => r.status?.toLowerCase() === 'resolved').length;
     
     return { totalReports, pendingReports, inProgressReports, resolvedReports };
   };
@@ -443,6 +451,13 @@ setProfileModalVisible(false);
           Responders: {(item as any).responders ? (item as any).responders.map((id: string) => nameMap[id] || id).join(', ') : (item as any).responderId}
         </Text>
         <Text style={styles.cardMeta}>Created: {new Date(item.createdAt).toLocaleString()}</Text>
+        <TouchableOpacity 
+          style={styles.detailsButton}
+          onPress={() => handleViewDetails(item)}
+          activeOpacity={0.8}
+        >
+          <Text style={styles.detailsButtonText}>View Details</Text>
+        </TouchableOpacity>
       </View>
     </Animated.View>
   );
@@ -712,7 +727,7 @@ setProfileModalVisible(false);
               </View>
               <View style={styles.rowBetween}>
                 <Text style={styles.meta}>
-                  Showing {displayed.length} of {reports.length}
+                  Showing {displayed.length} of {groupReportsByIncident(reports).length}
                 </Text>
                 <TouchableOpacity
                   style={styles.sortBtn}
@@ -806,6 +821,113 @@ setProfileModalVisible(false);
           >
             <Text style={styles.viewerCloseText}>✕</Text>
           </TouchableOpacity>
+        </View>
+      </Modal>
+
+      {/* Report Details Modal */}
+      <Modal
+        visible={detailsModalVisible}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setDetailsModalVisible(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>Report Details</Text>
+              <TouchableOpacity 
+                style={styles.modalCloseIconBtn} 
+                onPress={() => setDetailsModalVisible(false)}
+                activeOpacity={0.8}
+              >
+                <Text style={styles.modalCloseIconText}>✖</Text>
+              </TouchableOpacity>
+            </View>
+            
+            {selectedReport && (
+              <ScrollView 
+                style={styles.modalScrollView}
+                showsVerticalScrollIndicator={false}
+              >
+                <View style={styles.detailSection}>
+                  <View style={styles.detailRow}>
+                    <Text style={styles.detailLabel}>Type:</Text>
+                    <Text style={styles.detailValue}>{selectedReport.type || 'N/A'}</Text>
+                  </View>
+                  
+                  <View style={styles.detailRow}>
+                    <Text style={styles.detailLabel}>Status:</Text>
+                    <View style={[styles.statusBadge, { backgroundColor: getStatusColor(selectedReport.status) }]}>
+                      <Text style={styles.statusText}>
+                        {selectedReport.status?.toUpperCase() || 'UNKNOWN'}
+                      </Text>
+                    </View>
+                  </View>
+                </View>
+                
+                {selectedReport.description && (
+                  <View style={styles.detailSection}>
+                    <Text style={styles.sectionTitle}>Description</Text>
+                    <Text style={styles.descriptionText}>{selectedReport.description}</Text>
+                  </View>
+                )}
+                
+                <View style={styles.detailSection}>
+                  <Text style={styles.sectionTitle}>Responders</Text>
+                  <Text style={styles.detailValue}>
+                    {selectedReport.responderId 
+                      ? (nameMap[selectedReport.responderId] || selectedReport.responderId)
+                      : 'No responders assigned'}
+                  </Text>
+                </View>
+                
+                <View style={styles.detailSection}>
+                  <Text style={styles.sectionTitle}>Timeline</Text>
+                  <View style={styles.detailRow}>
+                    <Text style={styles.detailLabel}>Created:</Text>
+                    <Text style={styles.detailValue}>
+                      {new Date(selectedReport.createdAt).toLocaleString()}
+                    </Text>
+                  </View>
+                  
+                  <View style={styles.detailRow}>
+                    <Text style={styles.detailLabel}>Last Updated:</Text>
+                    <Text style={styles.detailValue}>
+                      {new Date(selectedReport.createdAt).toLocaleString()}
+                    </Text>
+                  </View>
+                </View>
+                
+                {(selectedReport.photoUrl || selectedReport.photoUri || (selectedReport as any)?.photoUrls?.length > 0) && (
+                  <View style={styles.detailSection}>
+                    <Text style={styles.sectionTitle}>Attachments</Text>
+                    <ScrollView 
+                      horizontal 
+                      showsHorizontalScrollIndicator={false}
+                      contentContainerStyle={styles.photosContainer}
+                    >
+                      {((selectedReport as any)?.photoUrls || [selectedReport.photoUrl || selectedReport.photoUri].filter(Boolean)).map((uri: string, idx: number) => (
+                        <TouchableOpacity
+                          key={`${uri}-${idx}`}
+                          onPress={() => {
+                            setImageViewerUri(uri);
+                            setImageViewerVisible(true);
+                          }}
+                          style={styles.thumbnailContainer}
+                        >
+                          <Image 
+                            source={{ uri }} 
+                            style={styles.thumbnailImage} 
+                            resizeMode="cover"
+                          />
+                        </TouchableOpacity>
+                      ))}
+                    </ScrollView>
+                  </View>
+                )}
+              </ScrollView>
+            )}
+          </View>
         </View>
       </Modal>
     </View>
@@ -1280,7 +1402,145 @@ const styles = StyleSheet.create({
   },
   collageOverlayText: {
     color: '#fff',
-    fontWeight: '900',
-    fontSize: 20,
-  }
+    fontWeight: 'bold',
+    fontSize: 18,
+  },
+  detailsButton: {
+    marginTop: 12,
+    padding: 10,
+    backgroundColor: '#1a1a3d',
+    borderRadius: 8,
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: '#2a2a5a',
+  },
+  detailsButtonText: {
+    color: '#4a9cff',
+    fontWeight: '600',
+    fontSize: 14,
+  },
+  // Modal Styles
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.6)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 20,
+  },
+  modalContent: {
+    width: '100%',
+    maxWidth: 500,
+    maxHeight: '90%',
+    backgroundColor: '#0f0f23',
+    borderRadius: 12,
+    padding: 20,
+    borderWidth: 1,
+    borderColor: '#2a2a5a',
+  },
+  modalHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 20,
+    paddingBottom: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: '#2a2a5a',
+  },
+  modalTitle: {
+    color: '#fff',
+    fontSize: 18,
+    fontWeight: '700',
+  },
+  modalCloseIconBtn: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: 'rgba(255,255,255,0.1)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  modalCloseIconText: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: '700',
+    lineHeight: 20,
+    marginTop: -1,
+  },
+  modalScrollView: {
+    maxHeight: 500, // Changed from '100%' to a fixed number
+    paddingRight: 4,
+  },
+  detailSection: {
+    marginBottom: 24,
+    backgroundColor: 'rgba(255,255,255,0.03)',
+    borderRadius: 8,
+    padding: 16,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.05)',
+  },
+  detailRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 12,
+  },
+  detailLabel: {
+    color: '#aaa',
+    fontSize: 14,
+    fontWeight: '500',
+    flex: 1,
+  },
+  detailValue: {
+    color: '#fff',
+    fontSize: 14,
+    fontWeight: '500',
+    textAlign: 'right',
+    flex: 1.5,
+  },
+  // sectionTitle: {
+  //   color: '#4a9cff',
+  //   fontSize: 15,
+  //   fontWeight: '700',
+  //   marginBottom: 12,
+  //   textTransform: 'uppercase',
+  //   letterSpacing: 0.5,
+  // },
+  descriptionText: {
+    color: '#e0e0e0',
+    fontSize: 14,
+    lineHeight: 22,
+  },
+  // statusBadge: {
+  //   paddingVertical: 4,
+  //   paddingHorizontal: 10,
+  //   borderRadius: 10,
+  //   minWidth: 80,
+  //   alignItems: 'center',
+  //   overflow: 'hidden' as const, 
+  // },
+  // statusText: {
+  //   color: '#fff',
+  //   fontSize: 11,
+  //   fontWeight: '800',
+  //   textTransform: 'uppercase',
+  //   letterSpacing: 0.5,
+  // },
+  photosContainer: {
+    flexDirection: 'row',
+    paddingVertical: 8,
+  },
+  thumbnailContainer: {
+    width: 80,
+    height: 80,
+    borderRadius: 8,
+    marginRight: 12,
+    overflow: 'hidden' as const,
+    backgroundColor: '#1a1a3d',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.1)',
+  },
+  thumbnailImage: {
+    width: '100%',
+    height: '100%',
+  },
 });

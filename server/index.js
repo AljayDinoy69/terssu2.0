@@ -421,6 +421,71 @@ app.get('/anonymous-reports', async (_req, res) => {
   }
 });
 
+// Create a new anonymous report
+app.post('/anonymous-reports', async (req, res) => {
+  try {
+    const { 
+      type, 
+      description, 
+      location, 
+      photoUrl, 
+      photoUrls = [], 
+      deviceId, 
+      contactNo, 
+      chiefComplaint, 
+      personsInvolved, 
+      fullName,
+      responderId 
+    } = req.body;
+
+    if (!type || !description || !location || !deviceId || !responderId) {
+      return res.status(400).json({ error: 'Missing required fields' });
+    }
+
+    const newReport = new AnonymousReport({
+      type,
+      description,
+      location,
+      photoUrl,
+      photoUrls: Array.isArray(photoUrls) ? photoUrls : [photoUrl].filter(Boolean),
+      deviceId,
+      contactNo,
+      chiefComplaint,
+      personsInvolved,
+      fullName,
+      responderId,
+      status: 'Pending',
+      isAnonymous: true
+    });
+
+    const savedReport = await newReport.save();
+    const report = savedReport.toClient();
+
+    // Create notification for the responder
+    try {
+      await Notification.create({
+        userId: responderId,
+        title: `New anonymous report: ${type}`,
+        reportId: String(report.id),
+        kind: 'new',
+        read: false,
+      });
+      console.log('Created responder notification for anonymous report:', report.id);
+    } catch (notifErr) {
+      console.error('Error creating responder notification:', notifErr);
+    }
+
+    // Broadcast new report event
+    sseBroadcast({ type: 'report:new', report });
+
+    res.status(201).json({ report });
+  } catch (err) {
+    console.error('Create anonymous report error', err);
+    res.status(500).json({ error: 'Failed to create anonymous report' });
+  }
+});
+
+// Get anonymous reports for a specific device
 app.get('/anonymous-reports/device/:deviceId', async (req, res) => {
   try {
     const { deviceId } = req.params;
@@ -532,60 +597,159 @@ app.get('/notifications', async (req, res) => {
   try {
     const userId = String(req.query.userId || '').trim();
     const deviceId = String(req.query.deviceId || '').trim();
+    const limit = parseInt(req.query.limit) || 50; // Default to 50, max 100
+    const skip = parseInt(req.query.skip) || 0;
 
-    console.log('Notification request - userId:', userId, 'deviceId:', deviceId);
+    console.log('Notification request - userId:', userId, 'deviceId:', deviceId, 'limit:', limit, 'skip:', skip);
 
-    if (!userId && !deviceId) return res.status(400).json({ error: 'userId or deviceId is required' });
+    if (!userId && !deviceId) {
+      return res.status(400).json({ error: 'userId or deviceId is required' });
+    }
 
     let notifications = [];
+    let total = 0;
 
     if (userId) {
       // Fetch regular notifications for registered users
       console.log('Fetching regular notifications for userId:', userId);
-      const docs = await Notification.find({ userId }).sort({ createdAt: -1 }).lean();
-      notifications = docs.map(d => ({ ...d, id: String(d._id), _id: undefined }));
+      total = await Notification.countDocuments({ userId });
+      const docs = await Notification.find({ userId })
+        .sort({ createdAt: -1 })
+        .skip(skip)
+        .limit(Math.min(limit, 100)) // Cap at 100 items
+        .lean();
+      
+      notifications = docs.map(d => ({
+        id: String(d._id),
+        title: d.title,
+        message: d.message || '',
+        reportId: d.reportId,
+        kind: d.kind || 'update',
+        read: !!d.read,
+        createdAt: d.createdAt,
+        updatedAt: d.updatedAt,
+        _id: undefined
+      }));
     } else if (deviceId) {
       // Fetch anonymous notifications for anonymous users
       console.log('Fetching anonymous notifications for deviceId:', deviceId);
-      const docs = await AnonymousNotification.find({ deviceId }).sort({ createdAt: -1 });
-      notifications = docs.map(d => d.toClient());
+      total = await AnonymousNotification.countDocuments({ deviceId });
+      const docs = await AnonymousNotification.find({ deviceId })
+        .sort({ createdAt: -1 })
+        .skip(skip)
+        .limit(Math.min(limit, 100)) // Cap at 100 items
+        .lean();
+      
+      notifications = docs.map(d => ({
+        id: String(d._id),
+        title: d.title,
+        message: d.message || '',
+        reportId: d.reportId,
+        kind: d.kind || 'update',
+        read: !!d.read,
+        priority: d.priority || 'normal',
+        category: d.category || 'report_update',
+        createdAt: d.createdAt,
+        updatedAt: d.updatedAt,
+        _id: undefined
+      }));
     }
 
-    console.log('Found', notifications.length, 'notifications');
-    console.log('Notification titles:', notifications.map(n => ({ id: n.id, title: n.title, kind: n.kind })));
-
-    res.json({ notifications });
+    console.log('Found', notifications.length, 'notifications out of', total);
+    
+    res.json({
+      notifications,
+      pagination: {
+        total,
+        limit: Math.min(limit, 100),
+        skip,
+        hasMore: (skip + notifications.length) < total
+      }
+    });
   } catch (err) {
     console.error('List notifications error', err);
     res.status(500).json({ error: 'Internal server error' });
   }
 });
 
+// Mark notification as read
 app.patch('/notifications/:id/read', async (req, res) => {
   try {
     const { id } = req.params;
-    const { read } = req.body || {};
+    const { read = true } = req.body || {};
+    const { userId, deviceId } = req.query;
 
-    // Try to update in AnonymousNotification first, then regular Notification
-    let updated = await AnonymousNotification.findByIdAndUpdate(id, { read: !!read }, { new: true });
-
-    if (updated) {
-      // Found in AnonymousNotification
-      const notification = updated.toClient();
-      console.log('Marked anonymous notification as read:', id, read);
-      res.json({ notification });
-    } else {
-      // Try regular Notification
-      updated = await Notification.findByIdAndUpdate(id, { read: !!read }, { new: true }).lean();
-      if (!updated) return res.status(404).json({ error: 'Notification not found' });
-
-      const notification = { ...updated, id: String(updated._id) };
-      delete notification._id;
-      console.log('Marked regular notification as read:', id, read);
-      res.json({ notification });
+    // Verify at least one identifier is provided
+    if (!userId && !deviceId) {
+      return res.status(400).json({ error: 'userId or deviceId query parameter is required' });
     }
+
+    // Try to update in AnonymousNotification first if deviceId is provided
+    if (deviceId) {
+      const updated = await AnonymousNotification.findOneAndUpdate(
+        { _id: id, deviceId },
+        { read: !!read, readAt: read ? new Date() : null },
+        { new: true }
+      );
+
+      if (updated) {
+        const notification = updated.toClient ? updated.toClient() : updated;
+        console.log('Marked anonymous notification as read:', id, read);
+        return res.json({ notification });
+      }
+    }
+
+    // Try regular Notification if userId is provided
+    if (userId) {
+      const updated = await Notification.findOneAndUpdate(
+        { _id: id, userId },
+        { read: !!read, readAt: read ? new Date() : null },
+        { new: true }
+      );
+
+      if (updated) {
+        const notification = updated.toObject ? updated.toObject() : updated;
+        notification.id = String(notification._id);
+        delete notification._id;
+        console.log('Marked regular notification as read:', id, read);
+        return res.json({ notification });
+      }
+    }
+
+    // If we got here, no matching notification was found
+    return res.status(404).json({ error: 'Notification not found or access denied' });
   } catch (err) {
     console.error('Update notification read error', err);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// Mark all notifications as read
+app.patch('/notifications/mark-all-read', async (req, res) => {
+  try {
+    const { userId, deviceId } = req.query;
+    
+    if (!userId && !deviceId) {
+      return res.status(400).json({ error: 'userId or deviceId query parameter is required' });
+    }
+
+    let result;
+    if (userId) {
+      result = await Notification.updateMany(
+        { userId, read: false },
+        { $set: { read: true, readAt: new Date() } }
+      );
+    } else if (deviceId) {
+      result = await AnonymousNotification.updateMany(
+        { deviceId, read: false },
+        { $set: { read: true, readAt: new Date() } }
+      );
+    }
+
+    console.log(`Marked ${result?.modifiedCount || 0} notifications as read`);
+    res.json({ success: true, updatedCount: result?.modifiedCount || 0 });
+  } catch (err) {
+    console.error('Mark all notifications as read error', err);
     res.status(500).json({ error: 'Internal server error' });
   }
 });

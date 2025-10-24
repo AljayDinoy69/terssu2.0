@@ -178,7 +178,17 @@ export async function listNotifications(userId?: string, deviceId?: string) {
 }
 
 export async function markNotificationRead(id: string, read: boolean) {
-  const { notification } = await api.patch<{ notification: Notification }>(`/notifications/${id}/read`, { read });
+  const user = await getCurrentUser();
+  const deviceId = await AsyncStorage.getItem('deviceId');
+  
+  const params = new URLSearchParams();
+  if (user?.id) params.append('userId', user.id);
+  else if (deviceId) params.append('deviceId', deviceId);
+  
+  const { notification } = await api.patch<{ notification: Notification }>(
+    `/notifications/${id}/read?${params.toString()}`, 
+    { read }
+  );
   return notification;
 }
 

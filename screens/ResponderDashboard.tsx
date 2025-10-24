@@ -1,4 +1,4 @@
-﻿import React, { useEffect, useState, useRef } from 'react';
+import React, { useEffect, useState, useRef } from 'react';
 import { View, Text, StyleSheet, FlatList, TouchableOpacity, Alert, Image, ScrollView, Animated, Dimensions, Modal, Platform, Linking } from 'react-native';
 import * as Location from 'expo-location';
 import Constants from 'expo-constants';
@@ -700,6 +700,15 @@ export default function ResponderDashboard({ navigation }: ResponderDashProps) {
       ) : (
         /* Original List View */
         <View style={styles.listWrap}>
+          {activeTab === 'pending' && (
+            <Text style={[styles.sectionTitle, { marginBottom: 15, marginTop: 0 }]}>Pending Reports</Text>
+          )}
+          {activeTab === 'active' && (
+            <Text style={[styles.sectionTitle, { marginBottom: 15, marginTop: 0 }]}>Active Incidents</Text>
+          )}
+          {activeTab === 'completed' && (
+            <Text style={[styles.sectionTitle, { marginBottom: 15, marginTop: 0 }]}>Resolved Cases</Text>
+          )}
           {activeList.length === 0 ? (
             <View style={styles.emptyState}>
               <Text style={styles.emptyText}>No reports in this tab</Text>
@@ -1180,10 +1189,12 @@ const styles = StyleSheet.create({
     padding: 20,
   },
   sectionTitle: {
-    fontSize: 18,
-    fontWeight: '700',
-    color: '#fff',
-    marginBottom: 16,
+    fontSize: 24,
+    fontWeight: 'bold',
+    marginBottom: 20,
+    color: 'white',
+    paddingHorizontal: 15,
+    marginTop: 10,
   },
   statsGrid: {
     flexDirection: 'row',
@@ -1445,6 +1456,7 @@ const styles = StyleSheet.create({
   mapLegendText: {
     color: '#ccc',
     fontSize: 12,
+    fontWeight: '600',
   },
   mapErrorText: {
     color: '#ffd166',
