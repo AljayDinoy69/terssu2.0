@@ -8,6 +8,7 @@ export type ThemeContextType = {
   theme: 'light' | 'dark'; // resolved effective theme
   setMode: (m: AppTheme) => Promise<void>;
   colors: {
+    [x: string]: string;
     background: string;
     text: string;
   };

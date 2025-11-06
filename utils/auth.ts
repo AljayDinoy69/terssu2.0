@@ -182,12 +182,18 @@ export async function markNotificationRead(id: string, read: boolean) {
   const deviceId = await AsyncStorage.getItem('deviceId');
   
   const params = new URLSearchParams();
-  if (user?.id) params.append('userId', user.id);
-  else if (deviceId) params.append('deviceId', deviceId);
+  if (user?.id) {
+    params.append('userId', user.id);
+  } else if (deviceId) {
+    params.append('deviceId', deviceId);
+  }
   
   const { notification } = await api.patch<{ notification: Notification }>(
-    `/notifications/${id}/read?${params.toString()}`, 
-    { read }
+    `/notifications/${id}/read?${params.toString()}`,
+    { 
+      read,
+      isAnonymous: !user?.id // Indicate this is an anonymous notification if no user is logged in
+    }
   );
   return notification;
 }
@@ -197,10 +203,26 @@ export async function deleteNotification(id: string) {
 }
 
 export async function markAllNotificationsRead(userId?: string, deviceId?: string) {
-  if (!userId && !deviceId) throw new Error('Either userId or deviceId must be provided');
-  const body: any = {};
+  const user = await getCurrentUser();
+  
+  // If no IDs provided, try to get them from current session
+  if (!userId && !deviceId) {
+    if (user?.id) {
+      userId = user.id;
+    } else {
+      const storedDeviceId = await AsyncStorage.getItem('deviceId');
+      if (!storedDeviceId) throw new Error('No user logged in and no deviceId provided');
+      deviceId = storedDeviceId;
+    }
+  }
+
+  const body: any = { 
+    isAnonymous: !user?.id 
+  };
+  
   if (userId) body.userId = userId;
   if (deviceId) body.deviceId = deviceId;
+  
   const res = await api.post<{ ok: boolean }>('/notifications/mark-all-read', body);
   return res.ok;
 }

@@ -522,26 +522,47 @@ app.get('/reports/responder/:responderId', async (req, res) => {
 app.patch('/reports/:id/status', async (req, res) => {
   try {
     const { id } = req.params;
-    const { status } = req.body || {};
+    const { status, responderId, notes } = req.body || {};
     const allowed = ['Pending', 'In-progress', 'Resolved'];
     if (!allowed.includes(status)) return res.status(400).json({ error: 'Invalid status' });
 
+    // Prepare update object
+    const updateData = { status };
+    
+    // Add responder info if provided
+    if (responderId) {
+      updateData.handledById = responderId;
+      if (status === 'In-progress') {
+        updateData.acknowledgedAt = new Date();
+      }
+    }
+    
+    // Add responder notes if provided
+    if (notes) {
+      updateData.responderNotes = notes;
+    }
+
     // Try to find in AnonymousReport first, then regular Report
-    let updatedDoc = await AnonymousReport.findByIdAndUpdate(id, { status }, { new: true });
+    let updatedDoc = await AnonymousReport.findByIdAndUpdate(
+      id, 
+      updateData,
+      { new: true }
+    );
+    
     let report;
     let isAnonymous = false;
 
     if (updatedDoc) {
       // Found in AnonymousReport
-      report = updatedDoc.toClient();
       isAnonymous = true;
-      console.log('Updated anonymous report status:', id, 'to', status);
+      report = updatedDoc.toClient();
+      console.log('Updated anonymous report status:', id, 'to', status, 'responder:', responderId || 'none');
     } else {
       // Try regular Report
-      updatedDoc = await Report.findByIdAndUpdate(id, { status }, { new: true });
+      updatedDoc = await Report.findByIdAndUpdate(id, updateData, { new: true });
       if (!updatedDoc) return res.status(404).json({ error: 'Report not found' });
       report = withId(updatedDoc.toObject());
-      console.log('Updated regular report status:', id, 'to', status);
+      console.log('Updated regular report status:', id, 'to', status, 'responder:', responderId || 'none');
     }
 
     res.json({ report });
@@ -549,40 +570,204 @@ app.patch('/reports/:id/status', async (req, res) => {
     // Broadcast SSE event for report status update
     sseBroadcast({ type: 'report:update', report });
 
-    // Do NOT notify the responder on status updates; only notify the reporting user below
-    // Also notify the reporting user when their case status changes
+    // Notify the reporting user about status changes
     try {
-      if (isAnonymous) {
-        // For anonymous reports, create AnonymousNotification
-        if (report.deviceId) {
-          let title = 'Your report was updated';
-          if (report.status === 'In-progress') title = 'Your report is now in progress (taken)';
-          if (report.status === 'Resolved') title = 'Your report has been completed';
-
-          await AnonymousNotification.create({
-            deviceId: String(report.deviceId),
-            title,
-            reportId: String(report.id),
-            kind: 'update',
-            read: false,
-          });
-          console.log('Created anonymous notification for report:', report.id, 'deviceId:', report.deviceId, 'status:', report.status);
+      if (isAnonymous && report.deviceId) {
+        // Only proceed if status has actually changed
+        const statusChanged = !updatedDoc.lastNotifiedStatus || updatedDoc.lastNotifiedStatus !== status;
+        
+        console.log('Processing anonymous notification:', {
+          reportId: report.id,
+          deviceId: report.deviceId,
+          currentStatus: status,
+          lastNotifiedStatus: updatedDoc.lastNotifiedStatus,
+          statusChanged,
+          hasDeviceId: !!report.deviceId
+        });
+        
+        if (statusChanged) {
+          // Build notification message based on status and responder info
+          let title, message = '';
+          
+          switch (status) {
+            case 'In-progress':
+              title = '🚨 Help is on the way!';
+              message = 'A responder has been assigned to your report and is on their way to assist you.';
+              if (responderId) {
+                // If we have responder info, we could add more details here
+                message += ' The responder is now handling your case.';
+              }
+              break;
+              
+            case 'Resolved':
+              title = '✅ Report Resolved';
+              message = 'Your report has been successfully resolved and is now closed.\n\n';
+              if (notes) {
+                message += `Responder's note: ${notes}\n\n`;
+              }
+              message += 'Thank you for using our service! If you need further assistance, please submit a new report.';
+              break;
+              
+            case 'Pending':
+            default:
+              title = '📝 Report Updated';
+              message = 'The status of your report has been updated.';
+          }
+          
+          try {
+            console.log('Preparing to create notification for device:', report.deviceId);
+            
+            // First, update the report with the new status and notification history
+            const updateData = {
+              lastNotifiedStatus: status,
+              $push: { 
+                notificationHistory: { 
+                  status, 
+                  notifiedAt: new Date(),
+                  message: `${status} - ${title}`,
+                  responderId: responderId || null
+                } 
+              }
+            };
+            
+            // If this is a status change to 'In-progress', set acknowledgedAt
+            if (status === 'In-progress') {
+              updateData.acknowledgedAt = new Date();
+              updateData.handledById = responderId || null;
+            }
+            
+            // Update the report first
+            await AnonymousReport.findByIdAndUpdate(
+              id, 
+              updateData,
+              { new: true }
+            );
+            
+            console.log('Report updated with new status:', status);
+            
+            // Create notification for anonymous user using AnonymousNotification model
+            const notificationObj = {
+              deviceId: String(report.deviceId),
+              title,
+              message,
+              reportId: String(report.id),
+              kind: 'update',
+              read: false,
+              priority: status === 'In-progress' || status === 'Resolved' ? 'high' : 'normal',
+              category: `report_${status.toLowerCase().replace('-', '_')}`,
+              status: status,
+              createdAt: new Date(),
+              updatedAt: new Date()
+            };
+            
+            console.log('Creating anonymous notification with data:', notificationObj);
+            
+            const notification = await AnonymousNotification.create(notificationObj);
+            console.log('Notification created successfully:', {
+              id: notification._id,
+              deviceId: notification.deviceId,
+              reportId: notification.reportId,
+              status: notification.status,
+              createdAt: notification.createdAt
+            });
+            
+            // Prepare the notification data for client
+            const notificationData = {
+              id: String(notification._id),
+              deviceId: String(notification.deviceId),
+              title: notification.title,
+              message: notification.message,
+              reportId: notification.reportId,
+              kind: notification.kind,
+              read: notification.read,
+              priority: notification.priority,
+              category: notification.category,
+              status: notification.status,
+              createdAt: notification.createdAt,
+              updatedAt: notification.updatedAt
+            };
+            
+            console.log('Anonymous notification created successfully:', notificationData);
+            
+            // Broadcast SSE event to all connected clients
+            const sseData = {
+              type: 'notification:new',
+              notification: notificationData
+            };
+            
+            console.log('Broadcasting SSE event:', sseData);
+            sseBroadcast(sseData);
+            console.log(`SSE event broadcast for device ${report.deviceId}`);
+            
+            // Also send a direct SSE event specifically for this device
+            const deviceSseData = {
+              type: 'device:notification',
+              deviceId: String(report.deviceId),
+              notification: notificationData
+            };
+            
+            console.log('Sending device-specific SSE event:', deviceSseData);
+            sseBroadcast(deviceSseData);
+            
+          } catch (error) {
+            console.error('Failed to create notification:', {
+              error: error.message,
+              deviceId: report.deviceId,
+              reportId: report.id,
+              status
+            });
+            throw error; // Re-throw to be caught by the outer try-catch
+          }
+        } else {
+          console.log(`Skipping duplicate status notification for report ${report.id} (${status})`);
         }
       } else {
         // For registered users, create regular notification
         if (report.userId) {
-          let title = 'Your report was updated';
-          if (report.status === 'In-progress') title = 'Your report is now in progress (taken)';
-          if (report.status === 'Resolved') title = 'Your report has been completed';
-
-          await Notification.create({
-            userId: String(report.userId),
-            title,
-            reportId: String(report.id),
-            kind: 'update',
-            read: false,
-          });
-          console.log('Created user notification for report:', report.id, 'user:', report.userId, 'status:', report.status);
+          const statusChanged = !report.lastNotifiedStatus || report.lastNotifiedStatus !== status;
+          
+          if (statusChanged) {
+            let title, message = '';
+            
+            switch (status) {
+              case 'In-progress':
+                title = 'Help is on the way!';
+                message = 'A responder has been assigned to your report.';
+                break;
+                
+              case 'Resolved':
+                title = 'Report Resolved';
+                message = 'Your report has been successfully resolved and is now closed.\n\n';
+                if (notes) {
+                  message += `Responder's note: ${notes}\n\n`;
+                }
+                message += 'Thank you for using our service! If you need further assistance, please submit a new report.';
+                break;
+                
+              case 'Pending':
+              default:
+                title = 'Report Updated';
+                message = 'The status of your report has been updated.';
+            }
+            
+            await Notification.create({
+              userId: String(report.userId),
+              title,
+              message,
+              reportId: String(report.id),
+              kind: 'update',
+              read: false,
+              priority: status === 'In-progress' ? 'high' : 'normal',
+              category: 'report_update'
+            });
+            
+            // Update the last notified status
+            await Report.findByIdAndUpdate(id, { lastNotifiedStatus: status });
+            
+            console.log(`Notification sent for user report ${report.id} (${status}) to user ${report.userId}`);
+          } else {
+            console.log(`Skipping duplicate status notification for user report ${report.id} (${status})`);
+          }
         }
       }
     } catch (e) { console.error('Create notification error', e); }
@@ -593,67 +778,125 @@ app.patch('/reports/:id/status', async (req, res) => {
 });
 
 // Notifications API
+// Helper function to get notifications
+async function getNotifications(userId, deviceId, limit = 50) {
+  try {
+    console.log('Getting notifications for:', { userId, deviceId, limit });
+    
+    if (userId) {
+      const notifications = await Notification.find({ userId })
+        .sort({ createdAt: -1 })
+        .limit(Math.min(limit, 100));
+      
+      console.log(`Found ${notifications.length} notifications for user ${userId}`);
+      return notifications;
+    } 
+    
+    if (deviceId) {
+      const notifications = await AnonymousNotification.find({ deviceId })
+        .sort({ createdAt: -1 })
+        .limit(Math.min(limit, 100));
+      
+      console.log(`Found ${notifications.length} anonymous notifications for device ${deviceId}`);
+      console.log('Sample notification:', notifications[0] ? {
+        id: notifications[0]._id,
+        deviceId: notifications[0].deviceId,
+        title: notifications[0].title,
+        status: notifications[0].status,
+        createdAt: notifications[0].createdAt
+      } : 'No notifications found');
+      
+      return notifications;
+    }
+    
+    throw new Error('Either userId or deviceId must be provided');
+  } catch (error) {
+    console.error('Error in getNotifications:', {
+      error: error.message,
+      userId,
+      deviceId,
+      stack: error.stack
+    });
+    throw error;
+  }
+}
+
 app.get('/notifications', async (req, res) => {
   try {
     const userId = String(req.query.userId || '').trim();
     const deviceId = String(req.query.deviceId || '').trim();
-    const limit = parseInt(req.query.limit) || 50; // Default to 50, max 100
+    const limit = Math.min(parseInt(req.query.limit) || 50, 100); // Cap at 100 items
     const skip = parseInt(req.query.skip) || 0;
 
     console.log('Notification request - userId:', userId, 'deviceId:', deviceId, 'limit:', limit, 'skip:', skip);
 
     if (!userId && !deviceId) {
-      return res.status(400).json({ error: 'userId or deviceId is required' });
+      return res.status(400).json({ error: 'Either userId or deviceId is required' });
     }
 
     let notifications = [];
     let total = 0;
+    let docs = [];
 
     if (userId) {
-      // Fetch regular notifications for registered users
-      console.log('Fetching regular notifications for userId:', userId);
+      // Handle user notifications
       total = await Notification.countDocuments({ userId });
-      const docs = await Notification.find({ userId })
+      docs = await Notification.find({ userId })
         .sort({ createdAt: -1 })
         .skip(skip)
-        .limit(Math.min(limit, 100)) // Cap at 100 items
+        .limit(limit)
         .lean();
       
-      notifications = docs.map(d => ({
-        id: String(d._id),
-        title: d.title,
-        message: d.message || '',
-        reportId: d.reportId,
-        kind: d.kind || 'update',
-        read: !!d.read,
-        createdAt: d.createdAt,
-        updatedAt: d.updatedAt,
-        _id: undefined
-      }));
+      console.log(`Found ${docs.length} notifications for user ${userId}`);
     } else if (deviceId) {
-      // Fetch anonymous notifications for anonymous users
-      console.log('Fetching anonymous notifications for deviceId:', deviceId);
-      total = await AnonymousNotification.countDocuments({ deviceId });
-      const docs = await AnonymousNotification.find({ deviceId })
-        .sort({ createdAt: -1 })
-        .skip(skip)
-        .limit(Math.min(limit, 100)) // Cap at 100 items
-        .lean();
-      
-      notifications = docs.map(d => ({
-        id: String(d._id),
-        title: d.title,
-        message: d.message || '',
-        reportId: d.reportId,
-        kind: d.kind || 'update',
-        read: !!d.read,
-        priority: d.priority || 'normal',
-        category: d.category || 'report_update',
-        createdAt: d.createdAt,
-        updatedAt: d.updatedAt,
-        _id: undefined
-      }));
+      // Handle anonymous user notifications
+      try {
+        total = await AnonymousNotification.countDocuments({ deviceId });
+        console.log(`Found ${total} total notifications for device ${deviceId}`);
+        
+        docs = await AnonymousNotification.find({ deviceId })
+          .sort({ createdAt: -1 })
+          .skip(skip)
+          .limit(limit)
+          .lean();
+        
+        console.log(`Retrieved ${docs.length} notifications for device ${deviceId}`);
+        
+        // Log sample notification for debugging
+        if (docs.length > 0) {
+          console.log('Sample notification data:', {
+            id: String(docs[0]._id),
+            deviceId: docs[0].deviceId,
+            title: docs[0].title,
+            status: docs[0].status,
+            createdAt: docs[0].createdAt
+          });
+        }
+      } catch (error) {
+        console.error('Error fetching anonymous notifications:', {
+          error: error.message,
+          stack: error.stack,
+          deviceId
+        });
+        throw error;
+      }
     }
+
+    // Process notifications to ensure consistent format
+    notifications = docs.map(d => ({
+      id: String(d._id),
+      title: d.title || 'Update',
+      message: d.message || '',
+      reportId: d.reportId,
+      kind: d.kind || 'update',
+      read: !!d.read,
+      priority: d.priority || 'normal',
+      category: d.category || 'report_update',
+      status: d.status || 'update',
+      createdAt: d.createdAt || new Date(),
+      updatedAt: d.updatedAt || new Date(),
+      _id: undefined
+    }));
 
     console.log('Found', notifications.length, 'notifications out of', total);
     
@@ -727,30 +970,43 @@ app.patch('/notifications/:id/read', async (req, res) => {
 // Mark all notifications as read
 app.patch('/notifications/mark-all-read', async (req, res) => {
   try {
-    const { userId, deviceId } = req.query;
+    const { userId, deviceId, isAnonymous } = req.body;
     
     if (!userId && !deviceId) {
-      return res.status(400).json({ error: 'userId or deviceId query parameter is required' });
+      return res.status(400).json({ error: 'Either userId or deviceId is required' });
     }
 
-    let result;
-    if (userId) {
-      result = await Notification.updateMany(
+    const update = { 
+      $set: { 
+        read: true, 
+        readAt: new Date(),
+        updatedAt: new Date()
+      } 
+    };
+
+    if (userId && !isAnonymous) {
+      // Update notifications for registered user
+      const result = await Notification.updateMany(
         { userId, read: false },
-        { $set: { read: true, readAt: new Date() } }
+        update
       );
+      console.log(`Marked ${result.modifiedCount} user notifications as read for user ${userId}`);
     } else if (deviceId) {
-      result = await AnonymousNotification.updateMany(
+      // Update notifications for anonymous user
+      const result = await AnonymousNotification.updateMany(
         { deviceId, read: false },
-        { $set: { read: true, readAt: new Date() } }
+        update
       );
+      console.log(`Marked ${result.modifiedCount} anonymous notifications as read for device ${deviceId}`);
     }
 
-    console.log(`Marked ${result?.modifiedCount || 0} notifications as read`);
-    res.json({ success: true, updatedCount: result?.modifiedCount || 0 });
+    res.json({ success: true });
   } catch (err) {
-    console.error('Mark all notifications as read error', err);
-    res.status(500).json({ error: 'Internal server error' });
+    console.error('Mark all notifications read error', err);
+    res.status(500).json({ 
+      error: 'Internal server error',
+      details: err.message 
+    });
   }
 });
 

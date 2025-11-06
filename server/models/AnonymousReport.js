@@ -1,6 +1,13 @@
 import mongoose from 'mongoose';
 
 // Schema for anonymous reports (no user identification)
+const NotificationHistorySchema = new mongoose.Schema({
+  status: { type: String, required: true },
+  notifiedAt: { type: Date, default: Date.now },
+  message: { type: String },
+  responderId: { type: String }
+}, { _id: false });
+
 const AnonymousReportSchema = new mongoose.Schema(
   {
     type: { type: String, required: true },
@@ -18,7 +25,17 @@ const AnonymousReportSchema = new mongoose.Schema(
     fullName: { type: String }, // Optional name for anonymous reports
     status: { type: String, enum: ['Pending', 'In-progress', 'Resolved'], default: 'Pending', index: true },
     // Privacy flag to ensure this is always anonymous
-    isAnonymous: { type: Boolean, default: true, required: true }
+    isAnonymous: { type: Boolean, default: true, required: true },
+    // Track the last status for which notification was sent
+    lastNotifiedStatus: { type: String, enum: ['Pending', 'In-progress', 'Resolved', null], default: null },
+    // Track notification history
+    notificationHistory: [NotificationHistorySchema],
+    // Track if the report has been acknowledged by a responder
+    acknowledgedAt: { type: Date },
+    // Track the responder who is handling the report
+    handledById: { type: String },
+    // Additional notes or updates from the responder
+    responderNotes: { type: String }
   },
   { timestamps: true }
 );

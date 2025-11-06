@@ -83,30 +83,51 @@ export default function HomeScreen({ navigation }: HomeProps) {
 
               console.log('SSE Event received:', evt.type, evt); // Debug log
 
-              if (evt.type === 'report:update') {
+              // Handle different types of events
+              if (evt.type === 'notification:new' || evt.type === 'device:notification') {
+                const notification = evt.notification;
+                if (!notification) return;
+
+                console.log('New notification received:', notification);
+                
+                // For device-specific notifications, check the deviceId
+                const isForThisDevice = evt.type === 'device:notification' 
+                  ? (currentDeviceId && evt.deviceId === currentDeviceId)
+                  : false;
+                
+                // For general notifications, check if it's for the current user/device
+                const isForCurrentUser = user 
+                  ? notification.userId === user?.id
+                  : (currentDeviceId && notification.deviceId === currentDeviceId);
+                
+                if (isForThisDevice || isForCurrentUser) {
+                  console.log('Notification is relevant to current device/user:', { 
+                    isForThisDevice, 
+                    isForCurrentUser,
+                    currentDeviceId,
+                    notificationDeviceId: notification.deviceId,
+                    userId: user?.id,
+                    notificationUserId: notification.userId
+                  });
+                  
+                  playNotificationSound();
+                  await fetchNotifications();
+                }
+              } 
+              else if (evt.type === 'report:update') {
                 const report = evt.report;
                 if (!report) return;
 
-                console.log('Report update event:', report.id, report.status); // Debug log
+                console.log('Report update event:', report.id, report.status);
 
                 // Check if this update is relevant to current user
-                let isRelevant = false;
-
-                if (user && report.userId === user.id) {
-                  // For registered users
-                  isRelevant = true;
-                  console.log('Update relevant to registered user:', user.id); // Debug log
-                } else if (!user && currentDeviceId && report.deviceId === currentDeviceId) {
-                  // For anonymous users
-                  isRelevant = true;
-                  console.log('Update relevant to anonymous user with deviceId:', currentDeviceId); // Debug log
-                }
+                const isRelevant = user 
+                  ? (report.userId === user.id)
+                  : (currentDeviceId && report.deviceId === currentDeviceId);
 
                 if (isRelevant) {
-                  console.log('Playing notification sound for report update'); // Debug log
+                  console.log('Report update is relevant, fetching notifications...');
                   playNotificationSound();
-
-                  // Refresh notifications to show the update
                   await fetchNotifications();
                 }
               }
@@ -230,25 +251,38 @@ export default function HomeScreen({ navigation }: HomeProps) {
     try {
       // Get current user to determine if anonymous or registered
       const user = await getCurrentUser();
-      console.log('Current user:', user); // Debug log
+      console.log('Fetching notifications - User:', user ? 'Registered' : 'Anonymous');
 
       let notifications: any[] = [];
 
       if (user) {
         // For registered users, fetch notifications by userId
-        console.log('Fetching notifications for registered user:', user.id); // Debug log
-        notifications = await listNotifications(user.id);
+        console.log('Fetching notifications for registered user:', user.id);
+        try {
+          notifications = await listNotifications(user.id);
+          console.log(`Found ${notifications.length} notifications for user ${user.id}`);
+        } catch (error) {
+          console.error('Error fetching user notifications:', error);
+          throw error;
+        }
       } else {
         // For anonymous users, get device ID and fetch device-specific notifications
         const deviceId = await ensureAnonymousDeviceId();
-        console.log('Anonymous user - Device ID from storage:', deviceId); // Debug log
+        console.log('Anonymous user - Device ID from storage:', deviceId);
 
         if (deviceId) {
-          console.log('Fetching notifications for anonymous user with deviceId:', deviceId); // Debug log
-          notifications = await listNotifications(undefined, deviceId);
+          console.log('Fetching notifications for anonymous user with deviceId:', deviceId);
+          try {
+            notifications = await listNotifications(undefined, deviceId);
+            console.log(`Found ${notifications.length} notifications for device ${deviceId}`);
+          } catch (error) {
+            console.error('Error fetching anonymous notifications:', error);
+            // Don't throw here, just return empty array to prevent UI issues
+            notifications = [];
+          }
         } else {
-          console.log('No device ID available for anonymous user; skipping fetch'); // Debug log
-          return;
+          console.log('No device ID available for anonymous user; using empty notifications');
+          notifications = [];
         }
       }
 

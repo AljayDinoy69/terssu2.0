@@ -1,8 +1,9 @@
 {
   "expo": {
     "name": "ERS - Emergency Responce System",
-    "slug": "ERS - Emergency Responce System",
+    "slug": "ERS",
     "version": "1.0.0",
+    "owners": "jhay_d",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",
@@ -27,13 +28,21 @@
         "googleMaps": {
           "apiKey": "AIzaSyCS8cQ-4hmFl0Lk3Z9vCngxFizTQEGGwEQ"
         }
-      }
+      },
+      "permissions": [
+        "android.permission.RECORD_AUDIO",
+        "android.permission.MODIFY_AUDIO_SETTINGS"
+      ],
+      "package": "com.jhay_d.ERS"
     },
     "web": {
       "favicon": "./assets/icon.png"
     },
     "extra": {
-      "googleMapsApiKey": "AIzaSyCS8cQ-4hmFl0Lk3Z9vCngxFizTQEGGwEQ"
+      "googleMapsApiKey": "AIzaSyCS8cQ-4hmFl0Lk3Z9vCngxFizTQEGGwEQ",
+      "eas": {
+        "projectId": "d97d7e46-f131-487c-b7f8-40dd3325718a"
+      }
     },
     "plugins": [
       "expo-audio"

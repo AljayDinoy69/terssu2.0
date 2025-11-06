@@ -34,7 +34,7 @@ export default function ReportScreen({ navigation, route }: ReportProps) {
     'Chest pain',
     'Severe bleeding',
     'Burn',
-    'Trauma/Injury',
+    'Trauma/ Injury/ Vehicular Accident',
     'Unconscious',
     'Seizure',
     'Allergic reaction',
@@ -382,10 +382,10 @@ export default function ReportScreen({ navigation, route }: ReportProps) {
               <TextInput
                 value={fullName}
                 onChangeText={setFullName}
-                placeholder="Your full name"
-                editable={!isAnonymous}
-                selectTextOnFocus={!isAnonymous}
-                style={[styles.input, fullName.length > 0 && styles.inputFilled, isAnonymous && styles.inputDisabled]}
+                placeholder={isAnonymous ? 'Anonymous' : 'Your full name'}
+                editable={true}
+                selectTextOnFocus={true}
+                style={[styles.input, fullName.length > 0 && styles.inputFilled]}
                 placeholderTextColor="#999"
               />
               {fullName.length > 0 && (
