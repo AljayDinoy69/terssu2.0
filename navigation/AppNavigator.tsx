@@ -9,6 +9,7 @@ import UserDashboard from '../screens/UserDashboard';
 import ResponderDashboard from '../screens/ResponderDashboard';
 import AdminDashboard from '../screens/AdminDashboard';
 import AdminCreateUsers from '../components/AdminCreateUsers';
+import DirectionsExampleScreen from '../screens/DirectionsExampleScreen';
 import { useTheme } from '../components/ThemeProvider';
 
 export type RootStackParamList = {
@@ -20,6 +21,7 @@ export type RootStackParamList = {
   ResponderDashboard: undefined;
   AdminDashboard: undefined;
   AdminCreateUsers: undefined;
+  DirectionsExample: undefined;
 };
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
@@ -45,6 +47,7 @@ export default function AppNavigator() {
         <Stack.Screen name="ResponderDashboard" component={ResponderDashboard} options={{ headerShown: false }} />
         <Stack.Screen name="AdminDashboard" component={AdminDashboard} options={{ headerShown: false }} />
         <Stack.Screen name="AdminCreateUsers" component={AdminCreateUsers} options={{ title: 'Create Users' }} />
+        <Stack.Screen name="DirectionsExample" component={DirectionsExampleScreen} options={{ title: 'Route Navigation' }} />
       </Stack.Navigator>
     </NavigationContainer>
   );

@@ -5,6 +5,8 @@ import Constants from 'expo-constants';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 
 import { MapComponent } from '../components/MapComponent';
+import DirectionsMap from '../components/DirectionsMap';
+import OpenRouteServiceMap from '../components/OpenRouteServiceMap';
 import { ReportCard } from '../components/ReportCard';
 import { RootStackParamList } from '../navigation/AppNavigator';
 import { getCurrentUser, listAssignedReports, logout, Report, updateReportStatus, ReportStatus, listUsers, listNotifications, markNotificationRead, deleteNotification, markAllNotificationsRead, Notification as NotificationItem } from '../utils/auth';
@@ -56,6 +58,7 @@ export default function ResponderDashboard({ navigation }: ResponderDashProps) {
   const [incidentCoord, setIncidentCoord] = useState<{ lat: number; lon: number } | null>(null);
   const [myCoord, setMyCoord] = useState<{ lat: number; lon: number } | null>(null);
   const [mapError, setMapError] = useState<string | null>(null);
+  const [routeInfo, setRouteInfo] = useState<{ distance: number; duration: number } | null>(null);
 
   // Use Google provider on Android and on iOS when not running inside Expo Go
   const isExpoGo = (Constants as any)?.appOwnership === 'expo';
@@ -935,31 +938,52 @@ export default function ResponderDashboard({ navigation }: ResponderDashProps) {
           >
             <Text style={styles.modalCloseIconText}>✖</Text>
           </TouchableOpacity>
-            <Text style={[styles.modalTitle, { color: colors.text }]}>Incident & My Location</Text>
+            <Text style={[styles.modalTitle, { color: colors.text }]}>Route to Incident</Text>
             {mapError ? (
               <Text style={styles.mapErrorText}>⚠️ {mapError}</Text>
             ) : null}
+            {routeInfo && (
+              <View style={styles.routeInfoCard}>
+                <View style={styles.routeInfoItem}>
+                  <Text style={styles.routeInfoLabel}>Distance</Text>
+                  <Text style={styles.routeInfoValue}>{routeInfo.distance.toFixed(2)} km</Text>
+                </View>
+                <View style={styles.routeInfoDivider} />
+                <View style={styles.routeInfoItem}>
+                  <Text style={styles.routeInfoLabel}>ETA</Text>
+                  <Text style={styles.routeInfoValue}>{Math.round(routeInfo.duration)} min</Text>
+                </View>
+              </View>
+            )}
             <View style={styles.mapBox}>
-              {incidentCoord ? (
-                <MapComponent
-                  incidentCoord={incidentCoord}
-                  myCoord={myCoord}
-                  distanceKm={distanceKm}
+              {incidentCoord && myCoord ? (
+                <OpenRouteServiceMap
+                  origin={{ latitude: myCoord.lat, longitude: myCoord.lon }}
+                  destination={{ latitude: incidentCoord.lat, longitude: incidentCoord.lon }}
+                  originTitle="Your Location"
+                  destinationTitle="Incident Location"
+                  strokeColor="#FF0000"
+                  strokeWidth={8}
+                  onReady={(result) => {
+                    setRouteInfo({ distance: result.distance, duration: result.duration });
+                    setMapError(''); // Clear any previous errors
+                  }}
+                  onError={(error) => {
+                    // Error is handled by the map component (shows warning banner)
+                    // We still have fallback straight-line distance
+                    console.warn('Route API error (fallback active):', error.message || error);
+                  }}
                 />
+              ) : incidentCoord && !myCoord ? (
+                <Text style={styles.mapErrorText}>⚠️ Unable to get your location</Text>
               ) : (
                 <Text style={styles.mapErrorText}>⚠️ Invalid incident location</Text>
               )}
             </View>
-            <View style={styles.mapLegend}>
-              <Text style={[styles.mapLegendText, { color: colors.text + '99' }]}>📍 Incident: {incidentCoord ? `${incidentCoord.lat.toFixed(5)}, ${incidentCoord.lon.toFixed(5)}` : 'N/A'}</Text>
-              <Text style={[styles.mapLegendText, { color: colors.text + '99' }]}>👤 Me: {myCoord ? `${myCoord.lat.toFixed(5)}, ${myCoord.lon.toFixed(5)}` : 'N/A'}</Text>
-              {incidentCoord && myCoord ? (
-                <Text style={[styles.mapLegendText, { color: colors.text + '99' }]}>📏 Distance: {distanceKm(incidentCoord, myCoord).toFixed(2)} km</Text>
-              ) : null}
-            </View>
           </View>
         </View>
       </Modal>
+
       {/* Profile Modal */}
       <ProfileModal
         visible={profileModalVisible}
@@ -1421,11 +1445,10 @@ const styles = StyleSheet.create({
     borderRadius: 16,
     borderWidth: 1,
     borderColor: '#333',
-    width: width,
-    maxWidth: '100%',
-    maxHeight: height,
-    alignSelf: 'stretch',
-    marginHorizontal: -10, // optional: cancel overlay padding if you keep it
+    width: Math.min(width * 0.98, 700),  
+    maxWidth: '98%',  
+    maxHeight: Math.min(height * 0.9, height - 40),
+    alignSelf: 'center',
   },
   mapBox: {
     borderRadius: 14,
@@ -1689,5 +1712,37 @@ const styles = StyleSheet.create({
     color: '#fff',
     fontSize: 18,
     fontWeight: '800',
+  },
+  routeInfoCard: {
+    flexDirection: 'row',
+    backgroundColor: '#1a1a2e',
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: '#333',
+    padding: 16,
+    marginTop: 12,
+    marginBottom: 8,
+    alignItems: 'center',
+    justifyContent: 'space-around',
+  },
+  routeInfoItem: {
+    alignItems: 'center',
+    flex: 1,
+  },
+  routeInfoLabel: {
+    color: '#a0a0a0',
+    fontSize: 12,
+    fontWeight: '600',
+    marginBottom: 4,
+  },
+  routeInfoValue: {
+    color: '#667eea',
+    fontSize: 20,
+    fontWeight: '800',
+  },
+  routeInfoDivider: {
+    width: 1,
+    height: 40,
+    backgroundColor: '#333',
   },
 });
