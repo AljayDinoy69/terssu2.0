@@ -249,45 +249,19 @@ export default function HomeScreen({ navigation }: HomeProps) {
   }, []);
   const fetchNotifications = async () => {
     try {
-      // Get current user to determine if anonymous or registered
       const user = await getCurrentUser();
-      console.log('Fetching notifications - User:', user ? 'Registered' : 'Anonymous');
-
-      let notifications: any[] = [];
-
-      if (user) {
-        // For registered users, fetch notifications by userId
-        console.log('Fetching notifications for registered user:', user.id);
-        try {
-          notifications = await listNotifications(user.id);
-          console.log(`Found ${notifications.length} notifications for user ${user.id}`);
-        } catch (error) {
-          console.error('Error fetching user notifications:', error);
-          throw error;
-        }
-      } else {
-        // For anonymous users, get device ID and fetch device-specific notifications
-        const deviceId = await ensureAnonymousDeviceId();
-        console.log('Anonymous user - Device ID from storage:', deviceId);
-
-        if (deviceId) {
-          console.log('Fetching notifications for anonymous user with deviceId:', deviceId);
-          try {
-            notifications = await listNotifications(undefined, deviceId);
-            console.log(`Found ${notifications.length} notifications for device ${deviceId}`);
-          } catch (error) {
-            console.error('Error fetching anonymous notifications:', error);
-            // Don't throw here, just return empty array to prevent UI issues
-            notifications = [];
-          }
-        } else {
-          console.log('No device ID available for anonymous user; using empty notifications');
-          notifications = [];
-        }
+      if (!user?.id) {
+        console.log('No user logged in, skipping notifications fetch');
+        setNotifications([]);
+        setNotificationCount(0);
+        return;
       }
 
-      console.log('Fetched notifications:', notifications.length, 'notifications'); // Debug log
-      console.log('Notification titles:', notifications.map(n => n.title)); // Debug log
+      console.log('Fetching notifications for user:', user.id);
+      
+      const notifications = await listNotifications(user.id);
+      console.log(`Found ${notifications.length} notifications for user ${user.id}`);
+      console.log('Notification titles:', notifications.map(n => n.title));
 
       setNotifications(notifications);
       const newCount = notifications.filter(n => !n.read).length;
@@ -385,7 +359,7 @@ export default function HomeScreen({ navigation }: HomeProps) {
       resizeMode="cover"
     >
       {/* Notification Bell */}
-      <View style={styles.header}>
+      {/* <View style={styles.header}>
         <TouchableOpacity
           style={[styles.notificationBell, notificationCount > 0 && styles.notificationBellWithBadge]}
           onPress={toggleNotificationModal}
@@ -400,7 +374,7 @@ export default function HomeScreen({ navigation }: HomeProps) {
             </View>
           )}
         </TouchableOpacity>
-      </View>
+      </View> */}
 
       {/* Header: notification bell removed */}
       <ScrollView style={styles.scroll} contentContainerStyle={styles.container}>
@@ -509,7 +483,7 @@ export default function HomeScreen({ navigation }: HomeProps) {
       </ScrollView>
 
       {/* Notification Modal */}
-      <Modal
+      {/* <Modal
         visible={isNotificationModalVisible}
         transparent={true}
         animationType="fade"
@@ -589,7 +563,7 @@ export default function HomeScreen({ navigation }: HomeProps) {
             </View>
           </TouchableOpacity>
         </View>
-      </Modal>
+      </Modal> */}
     </ImageBackground>
   );
 }
