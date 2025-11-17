@@ -142,6 +142,28 @@ export async function listResponders() {
   return responders;
 }
 
+export interface DuplicateCheckResponse {
+  isDuplicate: boolean;
+  existingReport?: {
+    id: string;
+    status: string;
+    createdAt: string;
+    responderName?: string;
+  };
+}
+
+export async function checkDuplicateReport(chiefComplaint: string, location: string): Promise<DuplicateCheckResponse> {
+  try {
+    const response = await api.get<{ isDuplicate: boolean; existingReport?: any }>(
+      `/reports/check-duplicate?chiefComplaint=${encodeURIComponent(chiefComplaint)}&location=${encodeURIComponent(location)}`
+    );
+    return response;
+  } catch (error) {
+    console.error('Error checking for duplicate report:', error);
+    return { isDuplicate: false };
+  }
+}
+
 export async function createReport(input: Omit<Report, 'id' | 'status' | 'createdAt'>) {
   const { report } = await api.post<{ report: Report }>('/reports', input);
   return report;
@@ -179,7 +201,7 @@ export async function listNotifications(userId?: string, deviceId?: string) {
 
 export async function markNotificationRead(id: string, read: boolean) {
   const user = await getCurrentUser();
-  const deviceId = await AsyncStorage.getItem('deviceId');
+  const deviceId = await AsyncStorage.getItem('ERS_DEVICE_ID');
   
   const params = new URLSearchParams();
   if (user?.id) {
@@ -210,7 +232,7 @@ export async function markAllNotificationsRead(userId?: string, deviceId?: strin
     if (user?.id) {
       userId = user.id;
     } else {
-      const storedDeviceId = await AsyncStorage.getItem('deviceId');
+      const storedDeviceId = await AsyncStorage.getItem('ERS_DEVICE_ID');
       if (!storedDeviceId) throw new Error('No user logged in and no deviceId provided');
       deviceId = storedDeviceId;
     }

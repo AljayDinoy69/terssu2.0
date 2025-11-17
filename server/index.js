@@ -78,6 +78,73 @@ function withId(obj) {
   return o;
 }
 
+// Simple helpers for location parsing and distance (Haversine)
+function parseLocation(str) {
+  if (!str || typeof str !== 'string') return null;
+  const parts = str.split(',');
+  if (parts.length < 2) return null;
+  const lat = parseFloat(parts[0]);
+  const lng = parseFloat(parts[1]);
+  if (Number.isNaN(lat) || Number.isNaN(lng)) return null;
+  return { lat, lng };
+}
+
+function haversineMeters(a, b) {
+  const R = 6371000; // meters
+  const toRad = (d) => (d * Math.PI) / 180;
+  const dLat = toRad(b.lat - a.lat);
+  const dLng = toRad(b.lng - a.lng);
+  const lat1 = toRad(a.lat);
+  const lat2 = toRad(b.lat);
+  const sinDLat = Math.sin(dLat / 2);
+  const sinDLng = Math.sin(dLng / 2);
+  const h = sinDLat * sinDLat + Math.cos(lat1) * Math.cos(lat2) * sinDLng * sinDLng;
+  const c = 2 * Math.atan2(Math.sqrt(h), Math.sqrt(1 - h));
+  return R * c;
+}
+
+// Duplicate detection across both Report and AnonymousReport
+async function findNearbyDuplicate({ chiefComplaint, location }) {
+  const loc = parseLocation(location);
+  if (!chiefComplaint || !loc) return null;
+  const now = Date.now();
+  const windowMs = 24 * 60 * 60 * 1000; // 24 hours for active reports
+  const since = new Date(now - windowMs);
+  const statuses = ['Pending', 'In-progress'];
+
+  const [recentAnon, recentReg] = await Promise.all([
+    AnonymousReport.find({ chiefComplaint, status: { $in: statuses }, createdAt: { $gte: since } })
+      .sort({ createdAt: -1 })
+      .limit(50),
+    Report.find({ type: chiefComplaint, status: { $in: statuses }, createdAt: { $gte: since } })
+      .sort({ createdAt: -1 })
+      .limit(50)
+  ]);
+
+  const radiusMeters = 500;
+  for (const r of [...recentAnon, ...recentReg]) {
+    const rLoc = parseLocation(r.location);
+    if (!rLoc) continue;
+    const d = haversineMeters(loc, rLoc);
+    if (d <= radiusMeters) {
+      let responderName;
+      try {
+        if (r.responderId) {
+          const acc = await Account.findById(r.responderId).lean();
+          responderName = acc?.name;
+        }
+      } catch {}
+      return {
+        id: String(r._id),
+        status: r.status,
+        createdAt: r.createdAt,
+        responderName,
+      };
+    }
+  }
+  return null;
+}
+
 // Health
 app.get('/health', (_req, res) => {
   res.json({ ok: true, service: 'ers-server', time: Date.now() });
@@ -315,6 +382,17 @@ app.post('/reports', async (req, res) => {
     // Allow clients that still send photoUri
     if (!input.photoUrl && input.photoUri) input.photoUrl = input.photoUri;
 
+    // Server-side duplicate prevention for registered users too
+    try {
+      const existing = await findNearbyDuplicate({ chiefComplaint: input.type, location: input.location });
+      if (existing) {
+        return res.status(409).json({ error: 'Duplicate report detected', isDuplicate: true, existingReport: existing });
+      }
+    } catch (e) {
+      console.warn('Duplicate check failed for /reports:', e?.message || e);
+      // Do not block if duplicate check throws; proceed to create
+    }
+
     let created;
     let report;
     let isAnonymousReport = !input.userId && input.deviceId;
@@ -374,6 +452,71 @@ app.post('/reports', async (req, res) => {
     } catch (e) { console.error('Create notification error', e); }
   } catch (err) {
     console.error('Create report error', err);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// Pre-check for duplicate report (search both registered and anonymous)
+app.get('/reports/check-duplicate', async (req, res) => {
+  try {
+    res.set('Cache-Control', 'no-store');
+    const chiefComplaint = String(req.query.chiefComplaint || '').trim();
+    const locationStr = String(req.query.location || '').trim();
+    if (!chiefComplaint || !locationStr) {
+      return res.status(400).json({ error: 'chiefComplaint and location are required' });
+    }
+
+    const loc = parseLocation(locationStr);
+    if (!loc) return res.status(400).json({ error: 'Invalid location format. Use "lat, lng"' });
+
+    const now = Date.now();
+    const windowMs = 24 * 60 * 60 * 1000; // 24 hours for active reports
+    const since = new Date(now - windowMs);
+    const statuses = ['Pending', 'In-progress'];
+
+    // Query recent reports (both models) with same chiefComplaint/type and active status
+    const [recentAnon, recentReg] = await Promise.all([
+      AnonymousReport.find({ chiefComplaint, status: { $in: statuses }, createdAt: { $gte: since } })
+        .sort({ createdAt: -1 })
+        .limit(50),
+      Report.find({ type: chiefComplaint, status: { $in: statuses }, createdAt: { $gte: since } })
+        .sort({ createdAt: -1 })
+        .limit(50)
+    ]);
+
+    const radiusMeters = 500; // 500m
+    let match = null;
+    for (const r of [...recentAnon, ...recentReg]) {
+      const rLoc = parseLocation(r.location);
+      if (!rLoc) continue;
+      const d = haversineMeters(loc, rLoc);
+      if (d <= radiusMeters) {
+        match = r;
+        break;
+      }
+    }
+
+    if (!match) return res.status(200).json({ isDuplicate: false });
+
+    // Build minimal response, try to include responder name if available
+    let responderName;
+    try {
+      if (match.responderId) {
+        const acc = await Account.findById(match.responderId).lean();
+        responderName = acc?.name;
+      }
+    } catch {}
+
+    const existingReport = {
+      id: String(match._id),
+      status: match.status,
+      createdAt: match.createdAt,
+      responderName,
+    };
+
+    res.status(200).json({ isDuplicate: true, existingReport });
+  } catch (err) {
+    console.error('Check duplicate error', err);
     res.status(500).json({ error: 'Internal server error' });
   }
 });
@@ -440,6 +583,17 @@ app.post('/anonymous-reports', async (req, res) => {
 
     if (!type || !description || !location || !deviceId || !responderId) {
       return res.status(400).json({ error: 'Missing required fields' });
+    }
+
+    // Server-side duplicate prevention for anonymous flow
+    try {
+      const existing = await findNearbyDuplicate({ chiefComplaint: chiefComplaint || type, location });
+      if (existing) {
+        return res.status(409).json({ error: 'Duplicate report detected', isDuplicate: true, existingReport: existing });
+      }
+    } catch (e) {
+      console.warn('Duplicate check failed for /anonymous-reports:', e?.message || e);
+      // Do not block if duplicate check throws; proceed to create
     }
 
     const newReport = new AnonymousReport({
@@ -572,17 +726,17 @@ app.patch('/reports/:id/status', async (req, res) => {
 
     // Notify the reporting user about status changes
     try {
-      if (isAnonymous && report.deviceId) {
+      if (isAnonymous && updatedDoc.deviceId) {
         // Only proceed if status has actually changed
         const statusChanged = !updatedDoc.lastNotifiedStatus || updatedDoc.lastNotifiedStatus !== status;
         
         console.log('Processing anonymous notification:', {
           reportId: report.id,
-          deviceId: report.deviceId,
+          deviceId: updatedDoc.deviceId,
           currentStatus: status,
           lastNotifiedStatus: updatedDoc.lastNotifiedStatus,
           statusChanged,
-          hasDeviceId: !!report.deviceId
+          hasDeviceId: !!updatedDoc.deviceId
         });
         
         if (statusChanged) {
@@ -615,7 +769,7 @@ app.patch('/reports/:id/status', async (req, res) => {
           }
           
           try {
-            console.log('Preparing to create notification for device:', report.deviceId);
+            console.log('Preparing to create notification for device:', updatedDoc.deviceId);
             
             // First, update the report with the new status and notification history
             const updateData = {
@@ -647,7 +801,7 @@ app.patch('/reports/:id/status', async (req, res) => {
             
             // Create notification for anonymous user using AnonymousNotification model
             const notificationObj = {
-              deviceId: String(report.deviceId),
+              deviceId: String(updatedDoc.deviceId),
               title,
               message,
               reportId: String(report.id),
@@ -697,12 +851,12 @@ app.patch('/reports/:id/status', async (req, res) => {
             
             console.log('Broadcasting SSE event:', sseData);
             sseBroadcast(sseData);
-            console.log(`SSE event broadcast for device ${report.deviceId}`);
+            console.log(`SSE event broadcast for device ${updatedDoc.deviceId}`);
             
             // Also send a direct SSE event specifically for this device
             const deviceSseData = {
               type: 'device:notification',
-              deviceId: String(report.deviceId),
+              deviceId: String(updatedDoc.deviceId),
               notification: notificationData
             };
             
@@ -712,7 +866,7 @@ app.patch('/reports/:id/status', async (req, res) => {
           } catch (error) {
             console.error('Failed to create notification:', {
               error: error.message,
-              deviceId: report.deviceId,
+              deviceId: updatedDoc.deviceId,
               reportId: report.id,
               status
             });

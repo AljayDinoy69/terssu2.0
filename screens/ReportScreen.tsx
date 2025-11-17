@@ -1,11 +1,11 @@
 import React, { useEffect, useState, useRef } from 'react';
-import { View, Text, TextInput, StyleSheet, TouchableOpacity, Alert, ScrollView, Image, Animated, Dimensions } from 'react-native';
+import { View, Text, TextInput, StyleSheet, TouchableOpacity, Alert, ScrollView, Image, Animated, Dimensions, Modal, TouchableWithoutFeedback } from 'react-native';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { RootStackParamList } from '../navigation/AppNavigator';
 import * as Location from 'expo-location';
 import * as ImagePicker from 'expo-image-picker';
 import { uploadImage } from '../utils/api';
-import { createReport, getCurrentUser, listResponders } from '../utils/auth';
+import { createReport, getCurrentUser, listResponders, checkDuplicateReport } from '../utils/auth';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 export type ReportProps = NativeStackScreenProps<RootStackParamList, 'Report'>;
@@ -28,6 +28,8 @@ export default function ReportScreen({ navigation, route }: ReportProps) {
   const [personsInvolved, setPersonsInvolved] = useState('');
   const [showChiefOptions, setShowChiefOptions] = useState(false);
   const [showPersonsOptions, setShowPersonsOptions] = useState(false);
+  const [duplicateModalVisible, setDuplicateModalVisible] = useState(false);
+  const [duplicateReport, setDuplicateReport] = useState<{ id: string; status: string; createdAt: string; responderName?: string } | null>(null);
 
   const chiefComplaintOptions = [
     'Breathing difficulty',
@@ -212,52 +214,37 @@ export default function ReportScreen({ navigation, route }: ReportProps) {
     setPhotos(prev => prev.filter((_, i) => i !== index));
   };
 
-  const onSubmit = async () => {
-    // Button press animation
-    Animated.sequence([
-      Animated.timing(buttonScale, {
-        toValue: 0.95,
-        duration: 100,
-        useNativeDriver: true,
-      }),
-      Animated.timing(buttonScale, {
-        toValue: 1,
-        duration: 100,
-        useNativeDriver: true,
-      }),
-    ]).start();
+  const checkForDuplicates = async (): Promise<boolean> => {
+    try {
+      const { isDuplicate, existingReport } = await checkDuplicateReport(chiefComplaint, locationText);
+      if (isDuplicate && existingReport) {
+        setDuplicateReport(existingReport);
+        setDuplicateModalVisible(true);
+        return true;
+      }
+      return false;
+    } catch (error: any) {
+      console.warn('Duplicate pre-check failed:', error?.message || error);
+      return false; // do not block if pre-check fails
+    }
+  };
 
-    if (!chiefComplaint || !contactNo || !personsInvolved || !locationText || selectedResponderIds.length === 0) {
-      return Alert.alert('Missing fields', 'Please complete all required fields');
-    }
-    
-    // Check if at least one photo is provided
-    if (photos.length === 0) {
-      return Alert.alert('Photos Required', 'Please capture at least one photo before submitting the report');
-    }
+  const handleSubmitReport = async () => {
     try {
       setLoading(true);
       const user = await getCurrentUser();
       const userId = isAnonymous ? undefined : user?.id;
-      
-      // Generate or retrieve device ID for anonymous reports
+
       let deviceId: string | undefined;
       if (isAnonymous) {
         const storedDeviceId = await AsyncStorage.getItem('ERS_DEVICE_ID');
-        console.log('ReportScreen - Anonymous user, stored deviceId:', storedDeviceId); // Debug log
-        
-        if (storedDeviceId) {
-          deviceId = storedDeviceId;
-          console.log('ReportScreen - Using existing deviceId:', deviceId); // Debug log
-        } else {
-          // Generate a unique device identifier
+        if (storedDeviceId) deviceId = storedDeviceId;
+        else {
           deviceId = `device_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
           await AsyncStorage.setItem('ERS_DEVICE_ID', deviceId);
-          console.log('ReportScreen - Generated new deviceId:', deviceId); // Debug log
         }
       }
-      
-      // Upload all photos and get their URLs
+
       const uploadedPhotos: string[] = [];
       for (const photoUri of photos.slice(0, MAX_PHOTOS)) {
         try {
@@ -265,31 +252,25 @@ export default function ReportScreen({ navigation, route }: ReportProps) {
           uploadedPhotos.push(uploaded.url);
         } catch (err: any) {
           console.error('Failed to upload photo:', err);
-          // Continue with other photos even if one fails
         }
       }
-      
       if (uploadedPhotos.length === 0) {
         Alert.alert('Warning', 'Could not upload any photos. Please try again.');
         return;
       }
-      
-      // Use the first photo as the main photo for backward compatibility
       const photoUrl = uploadedPhotos[0];
 
-      // Create one report per selected responder (server supports single responderId per report)
       await Promise.all(
         selectedResponderIds.map((rid) =>
           createReport({
-            // Server requires 'type'; use selected chief complaint as the type
             type: chiefComplaint || 'Emergency',
-            description: description || 'None', // Set to 'None' if empty
+            description: description || 'None',
             location: locationText,
-            photoUrl, // preferred; server also maps legacy photoUri
+            photoUrl,
             photoUrls: uploadedPhotos,
             responderId: rid,
             userId,
-            deviceId, // Include device ID for anonymous reports
+            deviceId,
             fullName: fullName || undefined,
             contactNo,
             chiefComplaint,
@@ -297,18 +278,42 @@ export default function ReportScreen({ navigation, route }: ReportProps) {
           })
         )
       );
-      
-      console.log('ReportScreen - Report submitted successfully'); // Debug log
-      console.log('ReportScreen - deviceId used:', deviceId); // Debug log
-      console.log('ReportScreen - isAnonymous:', isAnonymous); // Debug log
-      console.log('ReportScreen - userId:', userId); // Debug log
+
+      console.log('ReportScreen - Report submitted successfully');
       Alert.alert('Submitted', 'Your report has been sent to selected responders');
       if (userId) navigation.reset({ index: 0, routes: [{ name: 'UserDashboard' }] });
       else navigation.reset({ index: 0, routes: [{ name: 'Home' }] });
     } catch (e: any) {
-      Alert.alert('Failed', e.message || 'Unknown error');
+      if (e?.status === 409 && e?.data?.isDuplicate) {
+        if (e.data.existingReport) {
+          setDuplicateReport(e.data.existingReport);
+          setDuplicateModalVisible(true);
+          return;
+        }
+        return Alert.alert('Duplicate', 'A similar incident has already been reported nearby.');
+      }
+      Alert.alert('Failed', e?.message || 'Unknown error');
     } finally {
       setLoading(false);
+    }
+  };
+
+  const onSubmit = async () => {
+    Animated.sequence([
+      Animated.timing(buttonScale, { toValue: 0.95, duration: 100, useNativeDriver: true }),
+      Animated.timing(buttonScale, { toValue: 1, duration: 100, useNativeDriver: true }),
+    ]).start();
+
+    if (!chiefComplaint || !contactNo || !personsInvolved || !locationText || selectedResponderIds.length === 0) {
+      return Alert.alert('Missing fields', 'Please complete all required fields');
+    }
+    if (photos.length === 0) {
+      return Alert.alert('Photos Required', 'Please capture at least one photo before submitting the report');
+    }
+
+    const hasDuplicates = await checkForDuplicates();
+    if (!hasDuplicates) {
+      await handleSubmitReport();
     }
   };
 
@@ -638,11 +643,140 @@ export default function ReportScreen({ navigation, route }: ReportProps) {
           </Animated.View>
         )}
       </ScrollView>
+
+      {/* Duplicate Report Modal */}
+      <Modal
+        animationType="fade"
+        transparent={true}
+        visible={duplicateModalVisible}
+        onRequestClose={() => setDuplicateModalVisible(false)}
+      >
+        <TouchableWithoutFeedback onPress={() => setDuplicateModalVisible(false)}>
+          <View style={styles.modalOverlay}>
+            <TouchableWithoutFeedback>
+              <View style={styles.modalContent}>
+                <Text style={styles.modalTitle}>Similar Incident Report Found</Text>
+                <Text style={styles.modalText}>
+                  A similar incident has already been reported with the same chief complaint and location.
+                </Text>
+                
+                {duplicateReport && (
+                  <View style={styles.duplicateInfo}>
+                    <Text style={styles.duplicateText}>
+                      <Text style={styles.label}>Status:</Text> {duplicateReport.status}
+                    </Text>
+                    <Text style={styles.duplicateText}>
+                      <Text style={styles.label}>Reported on:</Text> {new Date(duplicateReport.createdAt).toLocaleString()}
+                    </Text>
+                    {duplicateReport.responderName && (
+                      <Text style={styles.duplicateText}>
+                        <Text style={styles.label}>Assigned to:</Text> {duplicateReport.responderName}
+                      </Text>
+                    )}
+                  </View>
+                )}
+
+                <View style={styles.modalButtons}>
+                  <TouchableOpacity 
+                    style={[styles.modalButton, styles.cancelButton]}
+                    onPress={() => setDuplicateModalVisible(false)}
+                  >
+                    <Text style={styles.cancelButtonText}>Cancel</Text>
+                  </TouchableOpacity>
+                  
+                  <TouchableOpacity 
+                    style={[styles.modalButton, styles.submitButton]}
+                    onPress={async () => {
+                      setDuplicateModalVisible(false);
+                      await handleSubmitReport();
+                    }}
+                  >
+                    <Text style={styles.submitButtonText}>Submit Anyway</Text>
+                  </TouchableOpacity>
+                </View>
+              </View>
+            </TouchableWithoutFeedback>
+          </View>
+        </TouchableWithoutFeedback>
+      </Modal>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
+  // ... existing styles ...
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 20,
+  },
+  modalContent: {
+    backgroundColor: 'white',
+    borderRadius: 10,
+    padding: 20,
+    width: '100%',
+    maxWidth: 400,
+    elevation: 5,
+  },
+  modalTitle: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    marginBottom: 15,
+    color: '#333',
+    textAlign: 'center',
+  },
+  modalText: {
+    fontSize: 16,
+    marginBottom: 20,
+    color: '#555',
+    lineHeight: 22,
+  },
+  duplicateInfo: {
+    backgroundColor: '#f8f9fa',
+    borderRadius: 8,
+    padding: 15,
+    marginBottom: 20,
+  },
+  duplicateText: {
+    fontSize: 14,
+    marginBottom: 5,
+    color: '#444',
+  },
+  label: {
+    fontWeight: '600',
+    color: '#2c3e50',
+  },
+  modalButtons: {
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    marginTop: 10,
+  },
+  modalButton: {
+    paddingVertical: 10,
+    paddingHorizontal: 20,
+    borderRadius: 5,
+    marginLeft: 10,
+    minWidth: 100,
+    alignItems: 'center',
+  },
+  cancelButton: {
+    backgroundColor: '#f1f1f1',
+    borderWidth: 1,
+    borderColor: '#ddd',
+  },
+  submitButton: {
+    backgroundColor: '#e74c3c',
+  },
+  cancelButtonText: {
+    color: '#333',
+    fontWeight: '600',
+  },
+  submitButtonText: {
+    color: 'white',
+    fontWeight: '600',
+  },
   container: {
     flex: 1,
     backgroundColor: '#0f0f23',

@@ -250,18 +250,25 @@ export default function HomeScreen({ navigation }: HomeProps) {
   const fetchNotifications = async () => {
     try {
       const user = await getCurrentUser();
-      if (!user?.id) {
-        console.log('No user logged in, skipping notifications fetch');
-        setNotifications([]);
-        setNotificationCount(0);
-        return;
-      }
-
-      console.log('Fetching notifications for user:', user.id);
+      let notifications: any[] = [];
       
-      const notifications = await listNotifications(user.id);
-      console.log(`Found ${notifications.length} notifications for user ${user.id}`);
-      console.log('Notification titles:', notifications.map(n => n.title));
+      if (user?.id) {
+        console.log('Fetching notifications for user:', user.id);
+        notifications = await listNotifications(user.id);
+        console.log(`Found ${notifications.length} notifications for user ${user.id}`);
+      } else {
+        // Anonymous: use deviceId
+        const deviceId = deviceIdRef.current || await AsyncStorage.getItem('ERS_DEVICE_ID');
+        if (!deviceId) {
+          console.log('No deviceId found for anonymous notifications');
+          setNotifications([]);
+          setNotificationCount(0);
+          return;
+        }
+        console.log('Fetching notifications for anonymous device:', deviceId);
+        notifications = await listNotifications(undefined, deviceId);
+        console.log(`Found ${notifications.length} notifications for device ${deviceId}`);
+      }
 
       setNotifications(notifications);
       const newCount = notifications.filter(n => !n.read).length;
@@ -359,7 +366,7 @@ export default function HomeScreen({ navigation }: HomeProps) {
       resizeMode="cover"
     >
       {/* Notification Bell */}
-      {/* <View style={styles.header}>
+      <View style={styles.header}>
         <TouchableOpacity
           style={[styles.notificationBell, notificationCount > 0 && styles.notificationBellWithBadge]}
           onPress={toggleNotificationModal}
@@ -374,7 +381,7 @@ export default function HomeScreen({ navigation }: HomeProps) {
             </View>
           )}
         </TouchableOpacity>
-      </View> */}
+      </View>
 
       {/* Header: notification bell removed */}
       <ScrollView style={styles.scroll} contentContainerStyle={styles.container}>
@@ -483,7 +490,7 @@ export default function HomeScreen({ navigation }: HomeProps) {
       </ScrollView>
 
       {/* Notification Modal */}
-      {/* <Modal
+      <Modal
         visible={isNotificationModalVisible}
         transparent={true}
         animationType="fade"
@@ -563,7 +570,7 @@ export default function HomeScreen({ navigation }: HomeProps) {
             </View>
           </TouchableOpacity>
         </View>
-      </Modal> */}
+      </Modal>
     </ImageBackground>
   );
 }

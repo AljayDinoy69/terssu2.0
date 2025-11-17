@@ -59,6 +59,9 @@ export default function ResponderDashboard({ navigation }: ResponderDashProps) {
   const [myCoord, setMyCoord] = useState<{ lat: number; lon: number } | null>(null);
   const [mapError, setMapError] = useState<string | null>(null);
   const [routeInfo, setRouteInfo] = useState<{ distance: number; duration: number } | null>(null);
+  // Chief complaint filter
+  const [chiefFilter, setChiefFilter] = useState<string>('All');
+  const [filterOpen, setFilterOpen] = useState<boolean>(false);
 
   // Use Google provider on Android and on iOS when not running inside Expo Go
   const isExpoGo = (Constants as any)?.appOwnership === 'expo';
@@ -194,6 +197,12 @@ export default function ResponderDashboard({ navigation }: ResponderDashProps) {
     }).start();
   }, [menuOpen]);
 
+  // Reset complaint filter when switching tabs
+  useEffect(() => {
+    setChiefFilter('All');
+    setFilterOpen(false);
+  }, [activeTab]);
+
   const load = async () => {
     const user = await getCurrentUser();
     if (!user) return navigation.replace('Login');
@@ -316,6 +325,14 @@ export default function ResponderDashboard({ navigation }: ResponderDashProps) {
   const active = reports.filter(r => r.status === 'In-progress').sort(byNewest);
   const completed = reports.filter(r => r.status === 'Resolved').sort(byNewest);
 
+  // Build complaint options per current tab and compute filtered list
+  const baseList = activeTab === 'pending' ? pending : activeTab === 'active' ? active : completed;
+  const complaintLabel = (c?: string) => (c && c.trim().length > 0 ? c.trim() : 'Unspecified');
+  const chiefOptions = Array.from(new Set(baseList.map(r => complaintLabel(r.chiefComplaint)))).sort((a, b) => a.localeCompare(b));
+  const filteredList = (chiefFilter === 'All')
+    ? baseList
+    : baseList.filter(r => complaintLabel(r.chiefComplaint) === chiefFilter);
+
   const getStatsData = () => {
     return {
       totalReports: reports.length,
@@ -347,8 +364,8 @@ export default function ResponderDashboard({ navigation }: ResponderDashProps) {
 
   const stats = getStatsData();
 
-  // Determine list based on selected tab
-  const activeList = activeTab === 'pending' ? pending : activeTab === 'active' ? active : completed;
+  // Determine list based on selected tab (after filter)
+  const activeList = filteredList;
 
   // const openExternalMaps = async (report: Report) => {
   //   const loc = parseLocation(report.location);
@@ -712,6 +729,44 @@ export default function ResponderDashboard({ navigation }: ResponderDashProps) {
           {activeTab === 'completed' && (
             <Text style={[styles.sectionTitle, { marginBottom: 15, marginTop: 0 }]}>Resolved Cases</Text>
           )}
+          {/* Chief Complaint Filter Dropdown */}
+          <View style={styles.filterRow}>
+            <Text style={styles.filterLabel}>Chief Complaint</Text>
+            <View style={{ position: 'relative', flex: 1 }}>
+              <TouchableOpacity
+                onPress={() => setFilterOpen(o => !o)}
+                style={styles.filterButton}
+                activeOpacity={0.8}
+              >
+                <Text style={styles.filterButtonText} numberOfLines={1}>{chiefFilter}</Text>
+                <Text style={styles.filterChevron}>{filterOpen ? '▲' : '▼'}</Text>
+              </TouchableOpacity>
+              {filterOpen && (
+                <View style={styles.dropdownPanel}>
+                  <ScrollView style={{ maxHeight: 220 }} showsVerticalScrollIndicator={false}>
+                    <TouchableOpacity
+                      onPress={() => { setChiefFilter('All'); setFilterOpen(false); }}
+                      style={[styles.dropdownItem, chiefFilter === 'All' && styles.dropdownItemActive]}
+                      activeOpacity={0.8}
+                    >
+                      <Text style={[styles.dropdownItemText, chiefFilter === 'All' && styles.dropdownItemTextActive]}>All</Text>
+                    </TouchableOpacity>
+                    {chiefOptions.map(opt => (
+                      <TouchableOpacity
+                        key={opt}
+                        onPress={() => { setChiefFilter(opt); setFilterOpen(false); }}
+                        style={[styles.dropdownItem, chiefFilter === opt && styles.dropdownItemActive]}
+                        activeOpacity={0.8}
+                      >
+                        <Text style={[styles.dropdownItemText, chiefFilter === opt && styles.dropdownItemTextActive]}>{opt}</Text>
+                      </TouchableOpacity>
+                    ))}
+                  </ScrollView>
+                </View>
+              )}
+            </View>
+          </View>
+
           {activeList.length === 0 ? (
             <View style={styles.emptyState}>
               <Text style={styles.emptyText}>No reports in this tab</Text>
@@ -1490,6 +1545,99 @@ const styles = StyleSheet.create({
   listWrap: {
     paddingHorizontal: 20,
     paddingBottom: 24,
+  },
+  // Chief complaint filter styles
+  filterBar: {
+    paddingHorizontal: 15,
+    paddingBottom: 10,
+    gap: 8,
+  },
+  chip: {
+    backgroundColor: '#1a1a2e',
+    borderWidth: 1,
+    borderColor: '#333',
+    paddingVertical: 6,
+    paddingHorizontal: 12,
+    borderRadius: 16,
+    marginRight: 8,
+  },
+  chipActive: {
+    backgroundColor: 'rgba(102, 126, 234, 0.2)',
+    borderColor: '#667eea',
+  },
+  chipText: {
+    color: '#bbb',
+    fontWeight: '700',
+    fontSize: 12,
+  },
+  chipTextActive: {
+    color: '#667eea',
+  },
+  // Dropdown filter styles
+  filterRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    paddingHorizontal: 15,
+    marginBottom: 10,
+  },
+  filterLabel: {
+    color: '#bbb',
+    fontWeight: '700',
+    fontSize: 12,
+    width: 110,
+  },
+  filterButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: '#1a1a2e',
+    borderWidth: 1,
+    borderColor: '#333',
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    borderRadius: 10,
+  },
+  filterButtonText: {
+    color: '#fff',
+    fontWeight: '700',
+    fontSize: 13,
+    flex: 1,
+    marginRight: 8,
+  },
+  filterChevron: {
+    color: '#bbb',
+    fontSize: 12,
+  },
+  dropdownPanel: {
+    position: 'absolute',
+    top: 44,
+    left: 0,
+    right: 0,
+    backgroundColor: '#0f0f23',
+    borderWidth: 1,
+    borderColor: '#333',
+    borderRadius: 10,
+    paddingVertical: 6,
+    zIndex: 20,
+  },
+  dropdownItem: {
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: '#1f1f35',
+  },
+  dropdownItemActive: {
+    backgroundColor: 'rgba(102, 126, 234, 0.18)'
+  },
+  dropdownItemText: {
+    color: '#ddd',
+    fontSize: 13,
+    fontWeight: '600',
+  },
+  dropdownItemTextActive: {
+    color: '#66d9ef',
+    fontWeight: '800',
   },
   // Modal styles
   modalOverlay: {

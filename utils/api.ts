@@ -58,8 +58,15 @@ async function request<T = any>(path: string, options: RequestInit = {}): Promis
     let data: any;
     try { data = text ? JSON.parse(text) : {}; } catch { data = { raw: text }; }
     if (!res.ok) {
-      const msg = data?.error || res.statusText || 'Request failed';
-      throw new Error(msg);
+      const parts = [String(res.status)];
+      if (res.statusText) parts.push(res.statusText);
+      const serverMsg = typeof data?.error === 'string' && data.error.trim() ? data.error.trim() : (text || '').trim();
+      if (serverMsg) parts.push(serverMsg);
+      const msg = parts.join(' ').trim() || 'Request failed';
+      const err: any = new Error(msg);
+      err.status = res.status;
+      err.data = data;
+      throw err;
     }
     console.log('[API] <-', res.status, url);
     return data as T;
