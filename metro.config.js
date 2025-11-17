@@ -1,19 +1,27 @@
 const { getDefaultConfig } = require('@expo/metro-config');
+const { resolve } = require('metro-resolver');
 
 const config = getDefaultConfig(__dirname);
 
-// More comprehensive exclusion and aliasing of react-native-maps for web builds
-config.resolver.blockList = [
-  ...(Array.isArray(config.resolver.blockList) ? config.resolver.blockList : []),
-  /react-native-maps\/lib\/.*/,
-  /react-native-maps\/src\/.*/,
-];
-
-// Alias react-native-maps and react-native-maps-directions to our web mocks for web builds
-config.resolver.alias = {
-  ...(config.resolver.alias || {}),
-  'react-native-maps': require.resolve('./react-native-maps-web-mock.js'),
-  'react-native-maps-directions': require.resolve('./react-native-maps-directions-web-mock.js'),
+// Only alias react-native-maps packages for WEB builds. Native builds should
+// resolve the real package from node_modules.
+config.resolver.resolveRequest = (context, moduleName, platform) => {
+  if (platform === 'web') {
+    if (moduleName === 'react-native-maps') {
+      return {
+        type: 'sourceFile',
+        filePath: require.resolve('./react-native-maps-web-mock.js'),
+      };
+    }
+    if (moduleName === 'react-native-maps-directions') {
+      return {
+        type: 'sourceFile',
+        filePath: require.resolve('./react-native-maps-directions-web-mock.js'),
+      };
+    }
+  }
+  // Fall back to Metro's default resolver
+  return resolve(context, moduleName, platform);
 };
 
 module.exports = config;
