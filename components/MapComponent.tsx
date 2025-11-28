@@ -1,35 +1,45 @@
-import React from 'react';
-import { View, Text, TouchableOpacity } from 'react-native';
+import React, { useEffect, useState } from 'react';
+import { View, Text, TouchableOpacity, ActivityIndicator, StyleSheet } from 'react-native';
 import { Platform } from 'react-native';
+import * as WebBrowser from 'expo-web-browser';
+import { GOOGLE_MAPS_API_KEY } from '../config';
 
 // Web Fallback Component
 const WebMapFallback: React.FC<{
   incidentCoord: { lat: number; lon: number };
   myCoord?: { lat: number; lon: number } | null;
   distanceKm: (a: { lat: number; lon: number }, b: { lat: number; lon: number }) => number;
-}> = ({ incidentCoord, myCoord, distanceKm }) => (
-  <View style={{ width: '100%', height: '100%', backgroundColor: '#f0f0f0', justifyContent: 'center', alignItems: 'center', borderRadius: 10 }}>
-    <Text style={{ fontSize: 16, color: '#666', textAlign: 'center', marginBottom: 10 }}>🗺️ Map View (Web Preview)</Text>
-    <View style={{ alignItems: 'center', gap: 8 }}>
-      <Text style={{ color: '#d90429', fontWeight: '700' }}>📍 Incident: {incidentCoord.lat.toFixed(5)}, {incidentCoord.lon.toFixed(5)}</Text>
-      {myCoord && (
-        <Text style={{ color: '#00aaff', fontWeight: '700' }}>👤 You: {myCoord.lat.toFixed(5)}, {myCoord.lon.toFixed(5)}</Text>
-      )}
-      {myCoord && (
-        <Text style={{ color: '#ffd166', fontWeight: '700' }}>📏 Distance: {distanceKm(incidentCoord, myCoord).toFixed(2)} km</Text>
-      )}
+}> = ({ incidentCoord, myCoord, distanceKm }) => {
+  const handleOpenMaps = async () => {
+    const url = `https://www.google.com/maps?q=${incidentCoord.lat},${incidentCoord.lon}`;
+    try {
+      await WebBrowser.openBrowserAsync(url);
+    } catch (error) {
+      console.error('Failed to open maps:', error);
+    }
+  };
+
+  return (
+    <View style={styles.fallbackContainer}>
+      <Text style={styles.fallbackTitle}>🗺️ Map View (Web Preview)</Text>
+      <View style={styles.coordinatesContainer}>
+        <Text style={styles.incidentText}>📍 Incident: {incidentCoord.lat.toFixed(5)}, {incidentCoord.lon.toFixed(5)}</Text>
+        {myCoord && (
+          <Text style={styles.userText}>👤 You: {myCoord.lat.toFixed(5)}, {myCoord.lon.toFixed(5)}</Text>
+        )}
+        {myCoord && (
+          <Text style={styles.distanceText}>📏 Distance: {distanceKm(incidentCoord, myCoord).toFixed(2)} km</Text>
+        )}
+      </View>
+      <TouchableOpacity
+        style={styles.mapsButton}
+        onPress={handleOpenMaps}
+      >
+        <Text style={styles.buttonText}>🔗 Open in Google Maps</Text>
+      </TouchableOpacity>
     </View>
-    <TouchableOpacity
-      style={{ marginTop: 15, paddingHorizontal: 12, paddingVertical: 6, backgroundColor: '#667eea', borderRadius: 6 }}
-      onPress={() => {
-        const url = `https://www.google.com/maps?q=${incidentCoord.lat},${incidentCoord.lon}`;
-        alert(`Open in Google Maps: ${url}`);
-      }}
-    >
-      <Text style={{ color: '#fff', fontWeight: '700' }}>🔗 Open in Google Maps</Text>
-    </TouchableOpacity>
-  </View>
-);
+  );
+};
 
 // Native Map Component - conditionally loaded based on platform
 const NativeMapComponent = Platform.OS === 'web'
@@ -120,14 +130,130 @@ interface MapComponentProps {
   distanceKm: (a: { lat: number; lon: number }, b: { lat: number; lon: number }) => number;
 }
 
+const styles = StyleSheet.create({
+  fallbackContainer: {
+    width: '100%',
+    height: '100%',
+    backgroundColor: '#f0f0f0',
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderRadius: 10,
+    padding: 16,
+  },
+  fallbackTitle: {
+    fontSize: 16,
+    color: '#666',
+    textAlign: 'center',
+    marginBottom: 16,
+    fontWeight: '600',
+  },
+  coordinatesContainer: {
+    alignItems: 'center',
+    gap: 12,
+    marginBottom: 20,
+  },
+  incidentText: {
+    color: '#d90429',
+    fontWeight: '700',
+    textAlign: 'center',
+  },
+  userText: {
+    color: '#00aaff',
+    fontWeight: '700',
+    textAlign: 'center',
+  },
+  distanceText: {
+    color: '#ffd166',
+    fontWeight: '700',
+    textAlign: 'center',
+  },
+  mapsButton: {
+    marginTop: 15,
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    backgroundColor: '#667eea',
+    borderRadius: 8,
+    elevation: 2,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+  },
+  buttonText: {
+    color: '#fff',
+    fontWeight: '700',
+    fontSize: 14,
+  },
+  loadingContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: '#f8f9fa',
+  },
+  errorContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 20,
+    backgroundColor: '#fff3f3',
+  },
+  errorText: {
+    color: '#d32f2f',
+    textAlign: 'center',
+    marginBottom: 16,
+  },
+});
+
 export const MapComponent: React.FC<MapComponentProps> = (props) => {
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    // Check if Google Maps API key is properly configured
+    if (!GOOGLE_MAPS_API_KEY || GOOGLE_MAPS_API_KEY === 'YOUR_API_KEY') {
+      setError('Google Maps API key is not properly configured');
+      setLoading(false);
+      return;
+    }
+    setLoading(false);
+  }, []);
+
+  // Show loading state
+  if (loading) {
+    return (
+      <View style={styles.loadingContainer}>
+        <ActivityIndicator size="large" color="#667eea" />
+        <Text style={{ marginTop: 10 }}>Loading map...</Text>
+      </View>
+    );
+  }
+
+  // Show error state if API key is not configured
+  if (error) {
+    return (
+      <View style={styles.errorContainer}>
+        <Text style={styles.errorText}>🚫 {error}</Text>
+        <Text style={{ textAlign: 'center' }}>
+          Please make sure to set up your Google Maps API key in the environment variables.
+        </Text>
+      </View>
+    );
+  }
+
   // Always use web fallback for web platform, native component for native platforms
   if (Platform.OS === 'web' || !NativeMapComponent) {
     return <WebMapFallback {...props} />;
   }
 
   return (
-    <React.Suspense fallback={<View style={{ width: '100%', height: '100%', backgroundColor: '#f0f0f0', justifyContent: 'center', alignItems: 'center' }}><Text>Loading map...</Text></View>}>
+    <React.Suspense 
+      fallback={
+        <View style={styles.loadingContainer}>
+          <ActivityIndicator size="large" color="#667eea" />
+          <Text style={{ marginTop: 10 }}>Loading map component...</Text>
+        </View>
+      }
+    >
       <NativeMapComponent {...props} />
     </React.Suspense>
   );
